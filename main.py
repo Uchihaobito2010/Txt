@@ -352,12 +352,97 @@ HTML_TEMPLATE = """
             margin-top: 10px;
         }
         
+        /* Updated Footer with Contact Info */
         .footer {
+            background: linear-gradient(135deg, #2d3748 0%, #1a202c 100%);
+            color: white;
+            padding: 30px;
             text-align: center;
-            padding: 20px;
-            background: #f8f9fa;
-            color: #666;
+            border-top: 4px solid #667eea;
+        }
+        
+        .footer-content {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .footer h3 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+        
+        .contact-links {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin: 25px 0;
+            flex-wrap: wrap;
+        }
+        
+        .contact-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .contact-icon {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: white;
+            transition: transform 0.3s;
+        }
+        
+        .contact-item:hover .contact-icon {
+            transform: scale(1.1) rotate(360deg);
+        }
+        
+        .contact-label {
             font-size: 0.9em;
+            color: #a0aec0;
+        }
+        
+        .contact-value {
+            font-weight: bold;
+            color: white;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+        
+        .contact-value:hover {
+            color: #667eea;
+        }
+        
+        .portfolio-link {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 50px;
+            font-weight: bold;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .portfolio-link:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .disclaimer {
+            margin-top: 20px;
+            font-size: 0.8em;
+            color: #a0aec0;
+            border-top: 1px solid #4a5568;
+            padding-top: 20px;
         }
         
         .search-box {
@@ -415,7 +500,7 @@ HTML_TEMPLATE = """
             <div id="upload-tab" class="tab-content">
                 <div class="input-section">
                     <div class="file-upload-area" onclick="document.getElementById('fileInput').click()">
-                        <div>📁</div>
+                        <div style="font-size: 48px; margin-bottom: 10px;">📁</div>
                         <h3>Click to upload or drag and drop</h3>
                         <p>Upload .py files or text files</p>
                         <input type="file" id="fileInput" accept=".py,.txt" style="display: none;" onchange="handleFileSelect(event)">
@@ -482,8 +567,39 @@ HTML_TEMPLATE = """
             </div>
         </div>
         
+        <!-- Updated Footer with Contact Info -->
         <div class="footer">
-            <p>⚡ Use with caution: Only execute code from trusted sources!</p>
+            <div class="footer-content">
+                <h3>📬 Connect With Me</h3>
+                
+                <div class="contact-links">
+                    <!-- Telegram Contact -->
+                    <div class="contact-item">
+                        <div class="contact-icon">📱</div>
+                        <span class="contact-label">Telegram</span>
+                        <a href="https://t.me/Aotpy" target="_blank" class="contact-value">@Aotpy</a>
+                    </div>
+                    
+                    <!-- Telegram Channel -->
+                    <div class="contact-item">
+                        <div class="contact-icon">📢</div>
+                        <span class="contact-label">Channel</span>
+                        <a href="https://t.me/ObitoStuffs" target="_blank" class="contact-value">@ObitoStuffs</a>
+                    </div>
+                </div>
+                
+                <!-- Portfolio Link -->
+                <a href="https://Aotpy.vercel.app" target="_blank" class="portfolio-link">
+                    🌐 Visit My Portfolio
+                </a>
+                
+                <div class="disclaimer">
+                    ⚠️ Disclaimer: Only execute code from trusted sources. 
+                    The author is not responsible for any misuse of this tool.
+                    <br><br>
+                    Made with ❤️ by Aotpy
+                </div>
+            </div>
         </div>
     </div>
 
@@ -787,18 +903,6 @@ HTML_TEMPLATE = """
             }
         }, 30000); // Refresh every 30 seconds
     </script>
-</body>
-</html>
-<div class="credit">
-<p>👨‍💻 Developer :
-<span class="tg" onclick="window.open('https://t.me/Aotpy','_blank')">@Aotpy</span></p>
-
-<p>🌐 Portfolio :
-<span class="tg" onclick="window.open('https://aotpy.vercel.app','_blank')">Portfolio</span></p>
-
-<p>📢 Channel :
-<span class="tg" onclick="window.open('https://t.me/obitostuffs','_blank')">@obitostuffs</span></p>
-</div>
 </body>
 </html>
 """
