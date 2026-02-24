@@ -1,15 +1,28 @@
-from flask import Flask, request, jsonify, render_template_string, send_file
+from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
 from flask_cors import CORS
 import uuid
-import os
 from datetime import datetime, timedelta
-import io
+from functools import wraps
 
 app = Flask(__name__)
+app.secret_key = 'aotpy-secret-key-2024'  # Change this in production
 CORS(app)
 
-# Store code snippets
+# Store code snippets (permanent storage - kabhi delete nahi honge)
 code_snippets = {}
+
+# Single user credentials (simple - change karo apne hisaab se)
+USERNAME = "admin"
+PASSWORD = "admin123"  # Change this to your password
+
+# Login required decorator
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'logged_in' not in session:
+            return jsonify({'error': 'Please login first'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -46,6 +59,7 @@ HTML_TEMPLATE = """
             color: white;
             padding: 30px;
             text-align: center;
+            position: relative;
         }
         
         .header h1 {
@@ -56,6 +70,85 @@ HTML_TEMPLATE = """
         .header p {
             opacity: 0.9;
             font-size: 1.1em;
+        }
+        
+        .user-status {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 15px;
+            border-radius: 50px;
+            font-size: 0.9em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .logout-btn {
+            background: rgba(255,255,255,0.3);
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.8em;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.4);
+        }
+        
+        .login-container {
+            max-width: 400px;
+            margin: 50px auto;
+            padding: 30px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .login-container h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .login-input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+        }
+        
+        .login-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .login-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .login-btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .error-msg {
+            color: #dc3545;
+            text-align: center;
+            margin-top: 10px;
+            display: none;
         }
         
         .main-content {
@@ -115,7 +208,6 @@ HTML_TEMPLATE = """
             font-family: 'Consolas', 'Monaco', monospace;
             font-size: 14px;
             resize: vertical;
-            transition: border-color 0.3s;
         }
         
         textarea:focus {
@@ -130,18 +222,10 @@ HTML_TEMPLATE = """
             text-align: center;
             background: #f8f9fa;
             cursor: pointer;
-            transition: all 0.3s;
         }
         
         .file-upload-area:hover {
             background: #e8eaf6;
-            border-color: #764ba2;
-        }
-        
-        .file-upload-area i {
-            font-size: 48px;
-            color: #667eea;
-            margin-bottom: 10px;
         }
         
         .file-info {
@@ -176,13 +260,6 @@ HTML_TEMPLATE = """
             font-weight: normal;
         }
         
-        input[type="number"] {
-            padding: 8px;
-            border: 2px solid #e0e0e0;
-            border-radius: 5px;
-            width: 80px;
-        }
-        
         button {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -192,14 +269,13 @@ HTML_TEMPLATE = """
             font-weight: 600;
             border-radius: 10px;
             cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: transform 0.2s;
             width: 100%;
             margin-bottom: 10px;
         }
         
         button:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
         }
         
         button.secondary {
@@ -221,11 +297,6 @@ HTML_TEMPLATE = """
             margin-top: 30px;
         }
         
-        .result-section h3 {
-            color: #333;
-            margin-bottom: 15px;
-        }
-        
         .url-box {
             background: white;
             border: 2px solid #e0e0e0;
@@ -233,8 +304,7 @@ HTML_TEMPLATE = """
             padding: 15px;
             margin-bottom: 15px;
             word-break: break-all;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 14px;
+            font-family: monospace;
         }
         
         .code-example {
@@ -242,8 +312,7 @@ HTML_TEMPLATE = """
             color: #f8f8f2;
             padding: 15px;
             border-radius: 8px;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 14px;
+            font-family: monospace;
             overflow-x: auto;
         }
         
@@ -251,19 +320,6 @@ HTML_TEMPLATE = """
             background: #28a745;
             margin-top: 10px;
             padding: 10px;
-            font-size: 0.9em;
-        }
-        
-        .copy-btn:hover {
-            background: #218838;
-        }
-        
-        .edit-section {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 20px;
-            margin-top: 20px;
-            border-left: 4px solid #667eea;
         }
         
         .snippet-list {
@@ -277,13 +333,6 @@ HTML_TEMPLATE = """
             border-radius: 8px;
             padding: 15px;
             margin-bottom: 10px;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .snippet-item:hover {
-            border-color: #667eea;
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
         }
         
         .snippet-item-header {
@@ -312,11 +361,6 @@ HTML_TEMPLATE = """
             color: white;
         }
         
-        .type-temporary {
-            background: #ffc107;
-            color: black;
-        }
-        
         .snippet-preview {
             color: #666;
             font-family: monospace;
@@ -335,41 +379,21 @@ HTML_TEMPLATE = """
             padding: 8px;
             font-size: 0.9em;
             width: auto;
-            margin: 0;
         }
         
-        .error {
-            color: #dc3545;
-            padding: 10px;
-            border-radius: 5px;
-            margin-top: 10px;
+        .edit-section {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            border-left: 4px solid #667eea;
         }
         
-        .success {
-            color: #28a745;
-            padding: 10px;
-            border-radius: 5px;
-            margin-top: 10px;
-        }
-        
-        /* Updated Footer with Contact Info */
         .footer {
             background: linear-gradient(135deg, #2d3748 0%, #1a202c 100%);
             color: white;
             padding: 30px;
             text-align: center;
-            border-top: 4px solid #667eea;
-        }
-        
-        .footer-content {
-            max-width: 600px;
-            margin: 0 auto;
-        }
-        
-        .footer h3 {
-            color: #667eea;
-            margin-bottom: 20px;
-            font-size: 1.5em;
         }
         
         .contact-links {
@@ -396,24 +420,11 @@ HTML_TEMPLATE = """
             align-items: center;
             justify-content: center;
             font-size: 24px;
-            color: white;
-            transition: transform 0.3s;
-        }
-        
-        .contact-item:hover .contact-icon {
-            transform: scale(1.1) rotate(360deg);
-        }
-        
-        .contact-label {
-            font-size: 0.9em;
-            color: #a0aec0;
         }
         
         .contact-value {
-            font-weight: bold;
             color: white;
             text-decoration: none;
-            transition: color 0.3s;
         }
         
         .contact-value:hover {
@@ -429,20 +440,12 @@ HTML_TEMPLATE = """
             text-decoration: none;
             border-radius: 50px;
             font-weight: bold;
-            transition: transform 0.3s, box-shadow 0.3s;
-        }
-        
-        .portfolio-link:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
         }
         
         .disclaimer {
             margin-top: 20px;
             font-size: 0.8em;
             color: #a0aec0;
-            border-top: 1px solid #4a5568;
-            padding-top: 20px;
         }
         
         .search-box {
@@ -451,7 +454,6 @@ HTML_TEMPLATE = """
             border: 2px solid #e0e0e0;
             border-radius: 8px;
             margin-bottom: 20px;
-            font-size: 1em;
         }
     </style>
 </head>
@@ -460,144 +462,134 @@ HTML_TEMPLATE = """
         <div class="header">
             <h1>🚀 Python Code Snippet Manager</h1>
             <p>Store, Edit & Execute Python Code Remotely</p>
+            
+            <div class="user-status" id="userStatus" style="display: none;">
+                <span id="username"></span>
+                <button class="logout-btn" onclick="logout()">Logout</button>
+            </div>
         </div>
         
-        <div class="main-content">
-            <div class="tabs">
-                <div class="tab active" onclick="switchTab('create')">📝 Create New</div>
-                <div class="tab" onclick="switchTab('manage')">🔧 Manage Snippets</div>
-                <div class="tab" onclick="switchTab('upload')">📁 Upload File</div>
+        <!-- Login Page -->
+        <div id="loginPage">
+            <div class="login-container">
+                <h2>🔐 Login</h2>
+                <input type="text" id="username" class="login-input" placeholder="Username" value="admin">
+                <input type="password" id="password" class="login-input" placeholder="Password" value="admin123">
+                <button class="login-btn" onclick="login()">Login</button>
+                <div id="loginError" class="error-msg">Invalid credentials!</div>
             </div>
-            
-            <!-- Create New Tab -->
-            <div id="create-tab" class="tab-content active">
-                <div class="input-section">
+        </div>
+        
+        <!-- Main App (Hidden until login) -->
+        <div id="mainApp" style="display: none;">
+            <div class="main-content">
+                <div class="tabs">
+                    <div class="tab active" onclick="switchTab('create')">📝 Create New</div>
+                    <div class="tab" onclick="switchTab('manage')">🔧 Manage Snippets</div>
+                    <div class="tab" onclick="switchTab('upload')">📁 Upload File</div>
+                </div>
+                
+                <!-- Create New Tab -->
+                <div id="create-tab" class="tab-content active">
+                    <div class="input-section">
+                        <div class="input-group">
+                            <label>📝 Your Python Code:</label>
+                            <textarea id="code" rows="10" placeholder="print('Hello, World!')"></textarea>
+                        </div>
+                        
+                        <div class="options">
+                            <div class="option-item">
+                                <input type="radio" name="storage" id="permanent" value="permanent" checked>
+                                <label for="permanent">💾 Permanent Storage</label>
+                            </div>
+                        </div>
+                        
+                        <button onclick="createSnippet()">🔗 Generate Link</button>
+                    </div>
+                </div>
+                
+                <!-- Upload File Tab -->
+                <div id="upload-tab" class="tab-content">
+                    <div class="input-section">
+                        <div class="file-upload-area" onclick="document.getElementById('fileInput').click()">
+                            <div style="font-size: 48px;">📁</div>
+                            <h3>Click to upload file</h3>
+                            <p>Upload .py or .txt files</p>
+                            <input type="file" id="fileInput" accept=".py,.txt" style="display: none;" onchange="handleFileSelect(event)">
+                        </div>
+                        
+                        <div class="file-info" id="fileInfo">
+                            <strong>File:</strong> <span id="fileName"></span>
+                            <br>
+                            <strong>Size:</strong> <span id="fileSize"></span>
+                        </div>
+                        
+                        <button onclick="uploadFile()" style="margin-top: 20px;">📤 Upload & Generate Link</button>
+                    </div>
+                </div>
+                
+                <!-- Manage Snippets Tab -->
+                <div id="manage-tab" class="tab-content">
+                    <div class="input-section">
+                        <input type="text" class="search-box" placeholder="🔍 Search snippets..." onkeyup="searchSnippets(this.value)">
+                        
+                        <div class="snippet-list" id="snippetList">
+                            <!-- Snippets will be loaded here -->
+                        </div>
+                        
+                        <button class="secondary" onclick="loadSnippets()">🔄 Refresh List</button>
+                    </div>
+                </div>
+                
+                <!-- Edit Section -->
+                <div id="editSection" class="edit-section" style="display: none;">
+                    <h3>✏️ Edit Snippet: <span id="editId"></span></h3>
                     <div class="input-group">
-                        <label for="code">📝 Your Python Code:</label>
-                        <textarea id="code" rows="10" placeholder="print('Hello, World!')" required></textarea>
+                        <textarea id="editCode" rows="10"></textarea>
                     </div>
+                    <button class="success" onclick="updateSnippet()">💾 Save Changes</button>
+                    <button class="secondary" onclick="cancelEdit()">❌ Cancel</button>
+                </div>
+                
+                <!-- Result Section -->
+                <div class="result-section" id="result" style="display: none;">
+                    <h3>✅ Your Code Link is Ready!</h3>
+                    <div class="url-box" id="snippetUrl"></div>
                     
-                    <div class="options">
-                        <div class="option-item">
-                            <input type="radio" name="storage" id="permanent" value="permanent" checked>
-                            <label for="permanent">💾 Permanent Storage</label>
-                        </div>
-                        <div class="option-item">
-                            <input type="radio" name="storage" id="temporary" value="temporary">
-                            <label for="temporary">⏱️ Temporary Storage</label>
-                        </div>
-                        <div class="option-item" id="expiryOption" style="display: none;">
-                            <label for="expiry">Expires in (minutes):</label>
-                            <input type="number" id="expiry" min="1" max="1440" value="60">
-                        </div>
-                    </div>
-                    
-                    <button onclick="createSnippet()">🔗 Generate Link</button>
+                    <h3>📋 Python Execution Code:</h3>
+                    <div class="code-example" id="execCode"></div>
+                    <button class="copy-btn" onclick="copyToClipboard()">📋 Copy to Clipboard</button>
                 </div>
             </div>
             
-            <!-- Upload File Tab -->
-            <div id="upload-tab" class="tab-content">
-                <div class="input-section">
-                    <div class="file-upload-area" onclick="document.getElementById('fileInput').click()">
-                        <div style="font-size: 48px; margin-bottom: 10px;">📁</div>
-                        <h3>Click to upload or drag and drop</h3>
-                        <p>Upload .py files or text files</p>
-                        <input type="file" id="fileInput" accept=".py,.txt" style="display: none;" onchange="handleFileSelect(event)">
+            <!-- Footer -->
+            <div class="footer">
+                <div class="footer-content">
+                    <h3>📬 Connect With Me</h3>
+                    
+                    <div class="contact-links">
+                        <div class="contact-item">
+                            <div class="contact-icon">📱</div>
+                            <span>Telegram</span>
+                            <a href="https://t.me/Aotpy" target="_blank" class="contact-value">@Aotpy</a>
+                        </div>
+                        
+                        <div class="contact-item">
+                            <div class="contact-icon">📢</div>
+                            <span>Channel</span>
+                            <a href="https://t.me/ObitoStuffs" target="_blank" class="contact-value">@ObitoStuffs</a>
+                        </div>
                     </div>
                     
-                    <div class="file-info" id="fileInfo">
-                        <strong>Selected file:</strong> <span id="fileName"></span>
+                    <a href="https://Aotpy.vercel.app" target="_blank" class="portfolio-link">
+                        🌐 Visit My Portfolio
+                    </a>
+                    
+                    <div class="disclaimer">
+                        ⚠️ Disclaimer: Only execute code from trusted sources.
                         <br>
-                        <strong>Size:</strong> <span id="fileSize"></span>
+                        Made with ❤️ by Aotpy
                     </div>
-                    
-                    <div class="options" style="margin-top: 20px;">
-                        <div class="option-item">
-                            <input type="radio" name="uploadStorage" id="uploadPermanent" value="permanent" checked>
-                            <label for="uploadPermanent">💾 Permanent Storage</label>
-                        </div>
-                        <div class="option-item">
-                            <input type="radio" name="uploadStorage" id="uploadTemporary" value="temporary">
-                            <label for="uploadTemporary">⏱️ Temporary Storage</label>
-                        </div>
-                        <div class="option-item" id="uploadExpiryOption" style="display: none;">
-                            <label for="uploadExpiry">Expires in (minutes):</label>
-                            <input type="number" id="uploadExpiry" min="1" max="1440" value="60">
-                        </div>
-                    </div>
-                    
-                    <button onclick="uploadFile()">📤 Upload & Generate Link</button>
-                </div>
-            </div>
-            
-            <!-- Manage Snippets Tab -->
-            <div id="manage-tab" class="tab-content">
-                <div class="input-section">
-                    <input type="text" class="search-box" placeholder="🔍 Search snippets..." onkeyup="searchSnippets(this.value)">
-                    
-                    <div class="snippet-list" id="snippetList">
-                        <!-- Snippets will be loaded here -->
-                    </div>
-                    
-                    <button class="secondary" onclick="loadSnippets()" style="margin-top: 20px;">🔄 Refresh List</button>
-                </div>
-            </div>
-            
-            <!-- Edit Section -->
-            <div id="editSection" class="edit-section" style="display: none;">
-                <h3>✏️ Edit Snippet: <span id="editId"></span></h3>
-                <div class="input-group">
-                    <textarea id="editCode" rows="10"></textarea>
-                </div>
-                <button class="success" onclick="updateSnippet()">💾 Save Changes</button>
-                <button class="secondary" onclick="cancelEdit()">❌ Cancel</button>
-            </div>
-            
-            <!-- Result Section -->
-            <div class="result-section" id="result" style="display: none;">
-                <h3>✅ Your Code Link is Ready!</h3>
-                <div class="url-box" id="snippetUrl"></div>
-                
-                <h3>📋 Python Execution Code:</h3>
-                <div class="code-example" id="execCode"></div>
-                <button class="copy-btn" onclick="copyToClipboard()">📋 Copy to Clipboard</button>
-                
-                <div id="statusMessage"></div>
-            </div>
-        </div>
-        
-        <!-- Updated Footer with Contact Info -->
-        <div class="footer">
-            <div class="footer-content">
-                <h3>📬 Connect With Me</h3>
-                
-                <div class="contact-links">
-                    <!-- Telegram Contact -->
-                    <div class="contact-item">
-                        <div class="contact-icon">📱</div>
-                        <span class="contact-label">Telegram</span>
-                        <a href="https://t.me/Aotpy" target="_blank" class="contact-value">@Aotpy</a>
-                    </div>
-                    
-                    <!-- Telegram Channel -->
-                    <div class="contact-item">
-                        <div class="contact-icon">📢</div>
-                        <span class="contact-label">Channel</span>
-                        <a href="https://t.me/ObitoStuffs" target="_blank" class="contact-value">@ObitoStuffs</a>
-                    </div>
-                </div>
-                
-                <!-- Portfolio Link -->
-                <a href="https://Aotpy.vercel.app" target="_blank" class="portfolio-link">
-                    🌐 Visit My Portfolio
-                </a>
-                
-                <div class="disclaimer">
-                    ⚠️ Disclaimer: Only execute code from trusted sources. 
-                    The author is not responsible for any misuse of this tool.
-                    <br><br>
-                    Made with ❤️ by Aotpy
                 </div>
             </div>
         </div>
@@ -607,6 +599,67 @@ HTML_TEMPLATE = """
         const baseUrl = window.location.origin;
         let currentEditId = null;
         let selectedFile = null;
+        
+        // Check login status on page load
+        checkLoginStatus();
+        
+        async function checkLoginStatus() {
+            try {
+                const response = await fetch('/api/check-auth');
+                const data = await response.json();
+                
+                if (data.logged_in) {
+                    showMainApp(data.username);
+                } else {
+                    showLogin();
+                }
+            } catch (error) {
+                showLogin();
+            }
+        }
+        
+        function showLogin() {
+            document.getElementById('loginPage').style.display = 'block';
+            document.getElementById('mainApp').style.display = 'none';
+            document.getElementById('userStatus').style.display = 'none';
+        }
+        
+        function showMainApp(username) {
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('mainApp').style.display = 'block';
+            document.getElementById('userStatus').style.display = 'flex';
+            document.getElementById('username').textContent = username;
+        }
+        
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showMainApp(username);
+                } else {
+                    document.getElementById('loginError').style.display = 'block';
+                }
+            } catch (error) {
+                document.getElementById('loginError').style.display = 'block';
+            }
+        }
+        
+        async function logout() {
+            await fetch('/api/logout', { method: 'POST' });
+            showLogin();
+        }
         
         // Tab switching
         function switchTab(tab) {
@@ -626,21 +679,6 @@ HTML_TEMPLATE = """
             }
         }
         
-        // Storage type options
-        document.querySelectorAll('input[name="storage"]').forEach(radio => {
-            radio.addEventListener('change', function() {
-                document.getElementById('expiryOption').style.display = 
-                    this.value === 'temporary' ? 'flex' : 'none';
-            });
-        });
-        
-        document.querySelectorAll('input[name="uploadStorage"]').forEach(radio => {
-            radio.addEventListener('change', function() {
-                document.getElementById('uploadExpiryOption').style.display = 
-                    this.value === 'temporary' ? 'flex' : 'none';
-            });
-        });
-        
         // File upload handling
         function handleFileSelect(event) {
             const file = event.target.files[0];
@@ -652,7 +690,6 @@ HTML_TEMPLATE = """
             }
         }
         
-        // Upload file
         async function uploadFile() {
             if (!selectedFile) {
                 alert('Please select a file first!');
@@ -661,17 +698,11 @@ HTML_TEMPLATE = """
             
             const reader = new FileReader();
             reader.onload = async function(e) {
-                const code = e.target.result;
-                const storageType = document.querySelector('input[name="uploadStorage"]:checked').value;
-                const expiry = storageType === 'temporary' ? 
-                    parseInt(document.getElementById('uploadExpiry').value) : null;
-                
-                await createSnippetWithCode(code, storageType, expiry);
+                await createSnippetWithCode(e.target.result);
             };
             reader.readAsText(selectedFile);
         }
         
-        // Create snippet from text
         async function createSnippet() {
             const code = document.getElementById('code').value.trim();
             if (!code) {
@@ -679,27 +710,24 @@ HTML_TEMPLATE = """
                 return;
             }
             
-            const storageType = document.querySelector('input[name="storage"]:checked').value;
-            const expiry = storageType === 'temporary' ? 
-                parseInt(document.getElementById('expiry').value) : null;
-            
-            await createSnippetWithCode(code, storageType, expiry);
+            await createSnippetWithCode(code);
         }
         
-        // Create snippet API call
-        async function createSnippetWithCode(code, storageType, expiry) {
+        async function createSnippetWithCode(code) {
             try {
                 const response = await fetch('/api/snippets', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        code: code,
-                        storage_type: storageType,
-                        expiry_minutes: expiry
-                    })
+                    body: JSON.stringify({ code: code })
                 });
+                
+                if (response.status === 401) {
+                    alert('Please login first!');
+                    showLogin();
+                    return;
+                }
                 
                 const data = await response.json();
                 
@@ -709,16 +737,6 @@ HTML_TEMPLATE = """
                     
                     document.getElementById('snippetUrl').textContent = snippetUrl;
                     document.getElementById('execCode').textContent = execCode;
-                    
-                    let statusMsg = '';
-                    if (storageType === 'temporary') {
-                        const expiryTime = new Date(data.expires_at * 1000).toLocaleString();
-                        statusMsg = `<div class="success">⏰ This code will expire on: ${expiryTime}</div>`;
-                    } else {
-                        statusMsg = '<div class="success">💾 This is a permanent link (will not expire)</div>';
-                    }
-                    
-                    document.getElementById('statusMessage').innerHTML = statusMsg;
                     document.getElementById('result').style.display = 'block';
                     
                     // Clear inputs
@@ -734,73 +752,57 @@ HTML_TEMPLATE = """
             }
         }
         
-        // Load all snippets
         async function loadSnippets() {
             try {
                 const response = await fetch('/api/snippets/list');
+                
+                if (response.status === 401) {
+                    showLogin();
+                    return;
+                }
+                
                 const snippets = await response.json();
                 
                 const snippetList = document.getElementById('snippetList');
                 snippetList.innerHTML = '';
                 
                 if (snippets.length === 0) {
-                    snippetList.innerHTML = '<p style="text-align: center; color: #666;">No snippets found</p>';
+                    snippetList.innerHTML = '<p style="text-align: center;">No snippets found</p>';
                     return;
                 }
                 
                 snippets.forEach(snippet => {
-                    const snippetElement = createSnippetElement(snippet);
-                    snippetList.appendChild(snippetElement);
+                    const div = document.createElement('div');
+                    div.className = 'snippet-item';
+                    div.innerHTML = `
+                        <div class="snippet-item-header">
+                            <span class="snippet-id">${snippet.id}</span>
+                            <span class="snippet-type type-permanent">Permanent</span>
+                        </div>
+                        <div class="snippet-preview">${snippet.preview}</div>
+                        <div class="snippet-actions">
+                            <button class="success" onclick="editSnippet('${snippet.id}')">✏️ Edit</button>
+                            <button class="danger" onclick="deleteSnippet('${snippet.id}')">🗑️ Delete</button>
+                            <button onclick="viewSnippet('${snippet.id}')">👁️ View</button>
+                            <button onclick="copySnippetUrl('${snippet.id}')">🔗 Copy URL</button>
+                        </div>
+                        <small>Created: ${new Date(snippet.created_at * 1000).toLocaleString()}</small>
+                    `;
+                    snippetList.appendChild(div);
                 });
             } catch (error) {
                 alert('Error loading snippets: ' + error);
             }
         }
         
-        // Create snippet element
-        function createSnippetElement(snippet) {
-            const div = document.createElement('div');
-            div.className = 'snippet-item';
-            
-            const expiryText = snippet.expires_at ? 
-                new Date(snippet.expires_at * 1000).toLocaleString() : 'Never';
-            
-            div.innerHTML = `
-                <div class="snippet-item-header">
-                    <span class="snippet-id">${snippet.id}</span>
-                    <span class="snippet-type ${snippet.storage_type === 'permanent' ? 'type-permanent' : 'type-temporary'}">
-                        ${snippet.storage_type}
-                    </span>
-                </div>
-                <div class="snippet-preview">${snippet.preview}</div>
-                <div class="snippet-actions">
-                    <button class="success" onclick="editSnippet('${snippet.id}')">✏️ Edit</button>
-                    <button class="danger" onclick="deleteSnippet('${snippet.id}')">🗑️ Delete</button>
-                    <button onclick="viewSnippet('${snippet.id}')">👁️ View</button>
-                    <button onclick="copySnippetUrl('${snippet.id}')">🔗 Copy URL</button>
-                </div>
-                <small>Created: ${new Date(snippet.created_at * 1000).toLocaleString()}</small>
-                <br>
-                <small>Expires: ${expiryText}</small>
-            `;
-            
-            return div;
-        }
-        
-        // Search snippets
         function searchSnippets(query) {
             const items = document.querySelectorAll('.snippet-item');
             items.forEach(item => {
                 const text = item.textContent.toLowerCase();
-                if (text.includes(query.toLowerCase())) {
-                    item.style.display = 'block';
-                } else {
-                    item.style.display = 'none';
-                }
+                item.style.display = text.includes(query.toLowerCase()) ? 'block' : 'none';
             });
         }
         
-        // Edit snippet
         async function editSnippet(id) {
             try {
                 const response = await fetch(`/snippet/${id}`);
@@ -815,7 +817,6 @@ HTML_TEMPLATE = """
             }
         }
         
-        // Update snippet
         async function updateSnippet() {
             if (!currentEditId) return;
             
@@ -835,7 +836,7 @@ HTML_TEMPLATE = """
                 });
                 
                 if (response.ok) {
-                    alert('✅ Snippet updated successfully!');
+                    alert('✅ Snippet updated!');
                     cancelEdit();
                     loadSnippets();
                 } else {
@@ -846,9 +847,8 @@ HTML_TEMPLATE = """
             }
         }
         
-        // Delete snippet
         async function deleteSnippet(id) {
-            if (!confirm('Are you sure you want to delete this snippet?')) return;
+            if (!confirm('Delete this snippet?')) return;
             
             try {
                 const response = await fetch(`/api/snippets/${id}`, {
@@ -856,52 +856,34 @@ HTML_TEMPLATE = """
                 });
                 
                 if (response.ok) {
-                    alert('✅ Snippet deleted successfully!');
+                    alert('✅ Snippet deleted!');
                     loadSnippets();
-                } else {
-                    alert('Error deleting snippet');
                 }
             } catch (error) {
                 alert('Error: ' + error);
             }
         }
         
-        // View snippet
         function viewSnippet(id) {
             window.open(`/snippet/${id}`, '_blank');
         }
         
-        // Copy snippet URL
         function copySnippetUrl(id) {
             const url = `${baseUrl}/snippet/${id}`;
             navigator.clipboard.writeText(url);
-            alert('✅ URL copied to clipboard!');
+            alert('✅ URL copied!');
         }
         
-        // Cancel edit
         function cancelEdit() {
             currentEditId = null;
             document.getElementById('editSection').style.display = 'none';
-            document.getElementById('editCode').value = '';
         }
         
-        // Copy to clipboard
         async function copyToClipboard() {
-            const execCode = document.getElementById('execCode').textContent;
-            try {
-                await navigator.clipboard.writeText(execCode);
-                alert('✅ Copied to clipboard!');
-            } catch (err) {
-                alert('❌ Failed to copy');
-            }
+            const text = document.getElementById('execCode').textContent;
+            await navigator.clipboard.writeText(text);
+            alert('✅ Copied!');
         }
-        
-        // Load snippets when switching to manage tab
-        setInterval(() => {
-            if (document.getElementById('manage-tab').classList.contains('active')) {
-                loadSnippets();
-            }
-        }, 30000); // Refresh every 30 seconds
     </script>
 </body>
 </html>
@@ -911,12 +893,39 @@ HTML_TEMPLATE = """
 def index():
     return render_template_string(HTML_TEMPLATE)
 
+# ========== LOGIN ROUTES ==========
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    
+    if username == USERNAME and password == PASSWORD:
+        session['logged_in'] = True
+        session['username'] = username
+        return jsonify({'success': True, 'username': username})
+    
+    return jsonify({'error': 'Invalid credentials'}), 401
+
+@app.route('/api/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({'success': True})
+
+@app.route('/api/check-auth', methods=['GET'])
+def check_auth():
+    if 'logged_in' in session:
+        return jsonify({'logged_in': True, 'username': session.get('username')})
+    return jsonify({'logged_in': False})
+
+# ========== SNIPPET ROUTES (Protected) ==========
+
 @app.route('/api/snippets', methods=['POST'])
+@login_required
 def create_snippet():
     data = request.json
     code = data.get('code')
-    storage_type = data.get('storage_type', 'permanent')
-    expiry_minutes = data.get('expiry_minutes')
     
     if not code:
         return jsonify({'error': 'No code provided'}), 400
@@ -924,27 +933,21 @@ def create_snippet():
     # Generate unique ID
     snippet_id = str(uuid.uuid4())[:8]
     
-    # Calculate expiry if temporary
-    expires_at = None
-    if storage_type == 'temporary' and expiry_minutes:
-        expires_at = (datetime.now() + timedelta(minutes=expiry_minutes)).timestamp()
-    
-    # Store the snippet
+    # Store the snippet (permanent - kabhi nahi hatega)
     code_snippets[snippet_id] = {
         'code': code,
         'created_at': datetime.now().timestamp(),
-        'expires_at': expires_at,
-        'storage_type': storage_type,
+        'storage_type': 'permanent',
         'preview': code[:100] + '...' if len(code) > 100 else code
     }
     
     return jsonify({
         'id': snippet_id,
-        'expires_at': expires_at,
-        'storage_type': storage_type
+        'storage_type': 'permanent'
     })
 
 @app.route('/api/snippets/<snippet_id>', methods=['PUT'])
+@login_required
 def update_snippet(snippet_id):
     if snippet_id not in code_snippets:
         return jsonify({'error': 'Snippet not found'}), 404
@@ -963,6 +966,7 @@ def update_snippet(snippet_id):
     return jsonify({'message': 'Snippet updated successfully'})
 
 @app.route('/api/snippets/<snippet_id>', methods=['DELETE'])
+@login_required
 def delete_snippet(snippet_id):
     if snippet_id in code_snippets:
         del code_snippets[snippet_id]
@@ -970,28 +974,21 @@ def delete_snippet(snippet_id):
     return jsonify({'error': 'Snippet not found'}), 404
 
 @app.route('/api/snippets/list', methods=['GET'])
+@login_required
 def list_snippets():
-    # Clean up expired snippets first
-    current_time = datetime.now().timestamp()
-    expired = []
-    
-    for snippet_id, snippet in list(code_snippets.items()):
-        if snippet.get('expires_at') and current_time > snippet['expires_at']:
-            expired.append(snippet_id)
-            del code_snippets[snippet_id]
-    
-    # Return all active snippets
+    # Return all snippets (permanent - kabhi delete nahi honge)
     snippets_list = []
     for snippet_id, snippet in code_snippets.items():
         snippets_list.append({
             'id': snippet_id,
             'created_at': snippet['created_at'],
-            'expires_at': snippet['expires_at'],
-            'storage_type': snippet['storage_type'],
+            'storage_type': 'permanent',
             'preview': snippet['preview']
         })
     
     return jsonify(snippets_list)
+
+# ========== PUBLIC ROUTE (No login required for viewing) ==========
 
 @app.route('/snippet/<snippet_id>')
 def get_snippet(snippet_id):
@@ -1000,26 +997,8 @@ def get_snippet(snippet_id):
     if not snippet:
         return "Snippet not found", 404
     
-    # Check if expired
-    if snippet.get('expires_at') and datetime.now().timestamp() > snippet['expires_at']:
-        # Remove expired snippet
-        del code_snippets[snippet_id]
-        return "This snippet has expired", 410
-    
-    # Return the code as plain text
+    # Return the code as plain text (public - koi bhi dekh sakta hai)
     return snippet['code'], 200, {'Content-Type': 'text/plain'}
-
-@app.route('/api/cleanup', methods=['POST'])
-def cleanup_expired():
-    expired = []
-    current_time = datetime.now().timestamp()
-    
-    for snippet_id, snippet in list(code_snippets.items()):
-        if snippet.get('expires_at') and current_time > snippet['expires_at']:
-            expired.append(snippet_id)
-            del code_snippets[snippet_id]
-    
-    return jsonify({'cleaned': len(expired), 'expired_ids': expired})
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
