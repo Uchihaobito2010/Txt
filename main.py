@@ -5,12 +5,11 @@ from datetime import datetime
 from functools import wraps
 
 app = Flask(__name__)
-app.secret_key = 'aotpy-secret-key-2024'  # Change this in production
+app.secret_key = 'aotpy-secret-key-2024'
 CORS(app)
 
 # Store users and their snippets
-users_db = {}  # username: {password: hash, snippets: {}}
-snippets_db = {}  # Global snippets storage with user_id
+users_db = {}
 
 # Login required decorator
 def login_required(f):
@@ -27,7 +26,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Public Python Code Snippet Manager</title>
+    <title>Python Code Snippet Manager</title>
     <style>
         * {
             margin: 0;
@@ -187,6 +186,7 @@ HTML_TEMPLATE = """
             margin-bottom: 30px;
             border-bottom: 2px solid #e0e0e0;
             padding-bottom: 10px;
+            flex-wrap: wrap;
         }
         
         .tab {
@@ -342,6 +342,8 @@ HTML_TEMPLATE = """
             justify-content: space-between;
             align-items: center;
             margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 10px;
         }
         
         .snippet-id {
@@ -365,18 +367,22 @@ HTML_TEMPLATE = """
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            margin-bottom: 10px;
         }
         
         .snippet-actions {
             display: flex;
             gap: 10px;
             margin-top: 10px;
+            flex-wrap: wrap;
         }
         
         .snippet-actions button {
-            padding: 8px;
+            padding: 8px 15px;
             font-size: 0.9em;
             width: auto;
+            flex: 1;
+            min-width: 80px;
         }
         
         .edit-section {
@@ -395,10 +401,14 @@ HTML_TEMPLATE = """
             padding: 15px;
             border-radius: 8px;
             margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
         }
         
         .stat-item {
             text-align: center;
+            flex: 1;
+            min-width: 100px;
         }
         
         .stat-value {
@@ -450,6 +460,10 @@ HTML_TEMPLATE = """
             text-decoration: none;
         }
         
+        .contact-value:hover {
+            text-decoration: underline;
+        }
+        
         .portfolio-link {
             display: inline-block;
             margin-top: 20px;
@@ -461,6 +475,10 @@ HTML_TEMPLATE = """
             font-weight: bold;
         }
         
+        .portfolio-link:hover {
+            transform: translateY(-2px);
+        }
+        
         .search-box {
             width: 100%;
             padding: 10px;
@@ -468,12 +486,35 @@ HTML_TEMPLATE = """
             border-radius: 8px;
             margin-bottom: 20px;
         }
+        
+        .welcome-message {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #e8eaf6;
+            border-radius: 8px;
+            color: #333;
+        }
+        
+        @media (max-width: 768px) {
+            .tabs {
+                flex-direction: column;
+            }
+            
+            .tab {
+                text-align: center;
+            }
+            
+            .snippet-actions button {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 Public Python Code Snippet Manager</h1>
+            <h1>🚀 Python Code Snippet Manager</h1>
             <p>Create, Share & Execute Python Code - Free for Everyone!</p>
             
             <div class="user-status" id="userStatus" style="display: none;">
@@ -515,6 +556,9 @@ HTML_TEMPLATE = """
         <!-- Main App (Hidden until login) -->
         <div id="mainApp" style="display: none;">
             <div class="main-content">
+                <!-- Welcome Message -->
+                <div class="welcome-message" id="welcomeMessage"></div>
+                
                 <!-- Stats Bar -->
                 <div class="stats-bar">
                     <div class="stat-item">
@@ -554,7 +598,7 @@ HTML_TEMPLATE = """
                 <div id="upload-tab" class="tab-content">
                     <div class="input-section">
                         <div class="file-upload-area" onclick="document.getElementById('fileInput').click()">
-                            <div style="font-size: 48px;">📁</div>
+                            <div style="font-size: 48px; margin-bottom: 10px;">📁</div>
                             <h3>Click to upload file</h3>
                             <p>Upload .py or .txt files</p>
                             <input type="file" id="fileInput" accept=".py,.txt" style="display: none;" onchange="handleFileSelect(event)">
@@ -640,7 +684,7 @@ HTML_TEMPLATE = """
                         🌐 Visit My Portfolio
                     </a>
                     
-                    <div class="disclaimer">
+                    <div class="disclaimer" style="margin-top: 20px; color: #a0aec0; font-size: 0.8em;">
                         ⚠️ Disclaimer: Only execute code from trusted sources.
                         <br>
                         Made with ❤️ by Aotpy | Public Tool - Free for Everyone
@@ -656,7 +700,9 @@ HTML_TEMPLATE = """
         let selectedFile = null;
         
         // Check login status on page load
-        checkLoginStatus();
+        window.onload = function() {
+            checkLoginStatus();
+        };
         
         async function checkLoginStatus() {
             try {
@@ -666,10 +712,12 @@ HTML_TEMPLATE = """
                 if (data.logged_in) {
                     showMainApp(data.username);
                     loadStats();
+                    loadMySnippets();
                 } else {
                     showAuth();
                 }
             } catch (error) {
+                console.error('Error checking login:', error);
                 showAuth();
             }
         }
@@ -685,6 +733,7 @@ HTML_TEMPLATE = """
             document.getElementById('mainApp').style.display = 'block';
             document.getElementById('userStatus').style.display = 'flex';
             document.getElementById('username').textContent = username;
+            document.getElementById('welcomeMessage').innerHTML = `Welcome, <strong>${username}</strong>! 👋`;
         }
         
         function switchAuthTab(tab) {
@@ -752,6 +801,12 @@ HTML_TEMPLATE = """
             const username = document.getElementById('loginUsername').value;
             const password = document.getElementById('loginPassword').value;
             
+            if (!username || !password) {
+                document.getElementById('loginError').textContent = 'Please enter username and password';
+                document.getElementById('loginError').style.display = 'block';
+                return;
+            }
+            
             try {
                 const response = await fetch('/api/login', {
                     method: 'POST',
@@ -766,10 +821,13 @@ HTML_TEMPLATE = """
                 if (response.ok) {
                     showMainApp(username);
                     loadStats();
+                    loadMySnippets();
                 } else {
+                    document.getElementById('loginError').textContent = data.error || 'Invalid credentials';
                     document.getElementById('loginError').style.display = 'block';
                 }
             } catch (error) {
+                document.getElementById('loginError').textContent = 'Error connecting to server';
                 document.getElementById('loginError').style.display = 'block';
             }
         }
@@ -810,11 +868,13 @@ HTML_TEMPLATE = """
         async function loadStats() {
             try {
                 const response = await fetch('/api/stats');
+                if (!response.ok) return;
+                
                 const stats = await response.json();
                 
-                document.getElementById('userSnippetCount').textContent = stats.user_snippets;
-                document.getElementById('totalSnippetCount').textContent = stats.total_snippets;
-                document.getElementById('userCount').textContent = stats.total_users;
+                document.getElementById('userSnippetCount').textContent = stats.user_snippets || 0;
+                document.getElementById('totalSnippetCount').textContent = stats.total_snippets || 0;
+                document.getElementById('userCount').textContent = stats.total_users || 0;
             } catch (error) {
                 console.error('Error loading stats:', error);
             }
@@ -886,8 +946,10 @@ HTML_TEMPLATE = """
                     document.getElementById('fileInfo').style.display = 'none';
                     selectedFile = null;
                     
-                    // Refresh stats
+                    // Refresh stats and snippets
                     loadStats();
+                    loadMySnippets();
+                    loadPublicSnippets();
                 } else {
                     alert('Error: ' + data.error);
                 }
@@ -911,16 +973,18 @@ HTML_TEMPLATE = """
                 snippetList.innerHTML = '';
                 
                 if (snippets.length === 0) {
-                    snippetList.innerHTML = '<p style="text-align: center;">You haven\'t created any snippets yet</p>';
+                    snippetList.innerHTML = '<p style="text-align: center; padding: 20px;">You haven\'t created any snippets yet</p>';
                     return;
                 }
+                
+                snippets.sort((a, b) => b.created_at - a.created_at);
                 
                 snippets.forEach(snippet => {
                     const div = createSnippetElement(snippet, true);
                     snippetList.appendChild(div);
                 });
             } catch (error) {
-                alert('Error loading snippets: ' + error);
+                console.error('Error loading snippets:', error);
             }
         }
         
@@ -933,16 +997,18 @@ HTML_TEMPLATE = """
                 snippetList.innerHTML = '';
                 
                 if (snippets.length === 0) {
-                    snippetList.innerHTML = '<p style="text-align: center;">No public snippets yet</p>';
+                    snippetList.innerHTML = '<p style="text-align: center; padding: 20px;">No public snippets yet</p>';
                     return;
                 }
+                
+                snippets.sort((a, b) => b.created_at - a.created_at);
                 
                 snippets.forEach(snippet => {
                     const div = createSnippetElement(snippet, false);
                     snippetList.appendChild(div);
                 });
             } catch (error) {
-                alert('Error loading snippets: ' + error);
+                console.error('Error loading public snippets:', error);
             }
         }
         
@@ -969,14 +1035,16 @@ HTML_TEMPLATE = """
                 `;
             }
             
+            const date = new Date(snippet.created_at * 1000).toLocaleString();
+            
             div.innerHTML = `
                 <div class="snippet-item-header">
                     <span class="snippet-id">${snippet.id}</span>
                     <span class="snippet-owner">by @${snippet.owner}</span>
                 </div>
-                <div class="snippet-preview">${snippet.preview}</div>
+                <div class="snippet-preview">${snippet.preview || snippet.code.substring(0, 100) + '...'}</div>
                 ${actions}
-                <small>Created: ${new Date(snippet.created_at * 1000).toLocaleString()}</small>
+                <small>Created: ${date}</small>
             `;
             
             return div;
@@ -1036,7 +1104,8 @@ HTML_TEMPLATE = """
                     loadMySnippets();
                     loadPublicSnippets();
                 } else {
-                    alert('Error updating snippet');
+                    const data = await response.json();
+                    alert('Error: ' + (data.error || 'Failed to update'));
                 }
             } catch (error) {
                 alert('Error: ' + error);
@@ -1068,19 +1137,27 @@ HTML_TEMPLATE = """
         
         function copySnippetUrl(id) {
             const url = `${baseUrl}/snippet/${id}`;
-            navigator.clipboard.writeText(url);
-            alert('✅ URL copied!');
+            navigator.clipboard.writeText(url).then(() => {
+                alert('✅ URL copied!');
+            }).catch(() => {
+                alert('❌ Failed to copy');
+            });
         }
         
         function cancelEdit() {
             currentEditId = null;
             document.getElementById('editSection').style.display = 'none';
+            document.getElementById('editCode').value = '';
         }
         
         async function copyToClipboard() {
             const text = document.getElementById('execCode').textContent;
-            await navigator.clipboard.writeText(text);
-            alert('✅ Copied!');
+            try {
+                await navigator.clipboard.writeText(text);
+                alert('✅ Copied!');
+            } catch (err) {
+                alert('❌ Failed to copy');
+            }
         }
     </script>
 </body>
@@ -1088,6 +1165,10 @@ HTML_TEMPLATE = """
 """
 
 # ========== AUTH ROUTES ==========
+
+@app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE)
 
 @app.route('/api/signup', methods=['POST'])
 def signup():
@@ -1103,7 +1184,7 @@ def signup():
     
     # Create new user
     users_db[username] = {
-        'password': password,  # In production, use password hashing
+        'password': password,
         'created_at': datetime.now().timestamp(),
         'snippets': {}
     }
@@ -1252,4 +1333,6 @@ def get_snippet(snippet_id):
     return "Snippet not found", 404
 
 if __name__ == '__main__':
+    print("🚀 Server starting...")
+    print("📍 Open http://localhost:5000 in your browser")
     app.run(debug=True, host='0.0.0.0', port=5000)
