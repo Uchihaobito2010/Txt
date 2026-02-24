@@ -6,7 +6,7 @@ from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = 'aotpy-secret-key-2024'
-CORS(app)
+CORS(app, supports_credentials=True)
 
 # Store users and their snippets
 users_db = {}
@@ -117,6 +117,7 @@ HTML_TEMPLATE = """
             cursor: pointer;
             font-weight: 600;
             color: #666;
+            transition: all 0.3s;
         }
         
         .auth-tab.active {
@@ -166,6 +167,9 @@ HTML_TEMPLATE = """
             color: #dc3545;
             text-align: center;
             margin-top: 10px;
+            padding: 10px;
+            background: #f8d7da;
+            border-radius: 5px;
             display: none;
         }
         
@@ -173,6 +177,9 @@ HTML_TEMPLATE = """
             color: #28a745;
             text-align: center;
             margin-top: 10px;
+            padding: 10px;
+            background: #d4edda;
+            border-radius: 5px;
             display: none;
         }
         
@@ -537,7 +544,7 @@ HTML_TEMPLATE = """
                     <input type="text" id="loginUsername" class="auth-input" placeholder="Username">
                     <input type="password" id="loginPassword" class="auth-input" placeholder="Password">
                     <button class="auth-btn" onclick="login()">Login</button>
-                    <div id="loginError" class="error-msg">Invalid credentials!</div>
+                    <div id="loginError" class="error-msg"></div>
                 </div>
                 
                 <!-- Signup Form -->
@@ -548,7 +555,7 @@ HTML_TEMPLATE = """
                     <input type="password" id="signupConfirmPassword" class="auth-input" placeholder="Confirm Password">
                     <button class="auth-btn" onclick="signup()">Sign Up</button>
                     <div id="signupError" class="error-msg"></div>
-                    <div id="signupSuccess" class="success-msg">Account created! Please login.</div>
+                    <div id="signupSuccess" class="success-msg"></div>
                 </div>
             </div>
         </div>
@@ -706,13 +713,16 @@ HTML_TEMPLATE = """
         
         async function checkLoginStatus() {
             try {
-                const response = await fetch('/api/check-auth');
+                const response = await fetch('/api/check-auth', {
+                    credentials: 'include'
+                });
                 const data = await response.json();
                 
                 if (data.logged_in) {
                     showMainApp(data.username);
                     loadStats();
                     loadMySnippets();
+                    loadPublicSnippets();
                 } else {
                     showAuth();
                 }
@@ -754,7 +764,11 @@ HTML_TEMPLATE = """
             const password = document.getElementById('signupPassword').value;
             const confirm = document.getElementById('signupConfirmPassword').value;
             
-            if (!username || !password) {
+            // Clear previous messages
+            document.getElementById('signupError').style.display = 'none';
+            document.getElementById('signupSuccess').style.display = 'none';
+            
+            if (!username || !password || !confirm) {
                 showError('signupError', 'Please fill all fields');
                 return;
             }
@@ -764,20 +778,35 @@ HTML_TEMPLATE = """
                 return;
             }
             
+            if (username.length < 3) {
+                showError('signupError', 'Username must be at least 3 characters');
+                return;
+            }
+            
+            if (password.length < 4) {
+                showError('signupError', 'Password must be at least 4 characters');
+                return;
+            }
+            
             try {
                 const response = await fetch('/api/signup', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ username, password })
+                    credentials: 'include',
+                    body: JSON.stringify({ 
+                        username: username, 
+                        password: password 
+                    })
                 });
                 
                 const data = await response.json();
                 
                 if (response.ok) {
+                    // Show success message
+                    document.getElementById('signupSuccess').innerHTML = '✅ Account created successfully! Please login.';
                     document.getElementById('signupSuccess').style.display = 'block';
-                    document.getElementById('signupError').style.display = 'none';
                     
                     // Clear form
                     document.getElementById('signupUsername').value = '';
@@ -790,19 +819,22 @@ HTML_TEMPLATE = """
                         document.getElementById('signupSuccess').style.display = 'none';
                     }, 2000);
                 } else {
-                    showError('signupError', data.error);
+                    showError('signupError', data.error || 'Error creating account');
                 }
             } catch (error) {
-                showError('signupError', 'Error creating account');
+                showError('signupError', 'Network error. Please try again.');
+                console.error('Signup error:', error);
             }
         }
         
         async function login() {
-            const username = document.getElementById('loginUsername').value;
+            const username = document.getElementById('loginUsername').value.trim();
             const password = document.getElementById('loginPassword').value;
             
+            document.getElementById('loginError').style.display = 'none';
+            
             if (!username || !password) {
-                document.getElementById('loginError').textContent = 'Please enter username and password';
+                document.getElementById('loginError').innerHTML = 'Please enter username and password';
                 document.getElementById('loginError').style.display = 'block';
                 return;
             }
@@ -813,6 +845,7 @@ HTML_TEMPLATE = """
                     headers: {
                         'Content-Type': 'application/json',
                     },
+                    credentials: 'include',
                     body: JSON.stringify({ username, password })
                 });
                 
@@ -822,24 +855,29 @@ HTML_TEMPLATE = """
                     showMainApp(username);
                     loadStats();
                     loadMySnippets();
+                    loadPublicSnippets();
                 } else {
-                    document.getElementById('loginError').textContent = data.error || 'Invalid credentials';
+                    document.getElementById('loginError').innerHTML = data.error || 'Invalid credentials';
                     document.getElementById('loginError').style.display = 'block';
                 }
             } catch (error) {
-                document.getElementById('loginError').textContent = 'Error connecting to server';
+                document.getElementById('loginError').innerHTML = 'Error connecting to server';
                 document.getElementById('loginError').style.display = 'block';
+                console.error('Login error:', error);
             }
         }
         
         async function logout() {
-            await fetch('/api/logout', { method: 'POST' });
+            await fetch('/api/logout', { 
+                method: 'POST',
+                credentials: 'include'
+            });
             showAuth();
         }
         
         function showError(elementId, message) {
             const errorDiv = document.getElementById(elementId);
-            errorDiv.textContent = message;
+            errorDiv.innerHTML = '❌ ' + message;
             errorDiv.style.display = 'block';
         }
         
@@ -867,7 +905,9 @@ HTML_TEMPLATE = """
         
         async function loadStats() {
             try {
-                const response = await fetch('/api/stats');
+                const response = await fetch('/api/stats', {
+                    credentials: 'include'
+                });
                 if (!response.ok) return;
                 
                 const stats = await response.json();
@@ -921,6 +961,7 @@ HTML_TEMPLATE = """
                     headers: {
                         'Content-Type': 'application/json',
                     },
+                    credentials: 'include',
                     body: JSON.stringify({ code: code })
                 });
                 
@@ -960,7 +1001,9 @@ HTML_TEMPLATE = """
         
         async function loadMySnippets() {
             try {
-                const response = await fetch('/api/my-snippets');
+                const response = await fetch('/api/my-snippets', {
+                    credentials: 'include'
+                });
                 
                 if (response.status === 401) {
                     showAuth();
@@ -990,7 +1033,9 @@ HTML_TEMPLATE = """
         
         async function loadPublicSnippets() {
             try {
-                const response = await fetch('/api/public-snippets');
+                const response = await fetch('/api/public-snippets', {
+                    credentials: 'include'
+                });
                 const snippets = await response.json();
                 
                 const snippetList = document.getElementById('publicSnippetList');
@@ -1036,13 +1081,14 @@ HTML_TEMPLATE = """
             }
             
             const date = new Date(snippet.created_at * 1000).toLocaleString();
+            const preview = snippet.preview || (snippet.code ? snippet.code.substring(0, 100) + '...' : 'No preview');
             
             div.innerHTML = `
                 <div class="snippet-item-header">
                     <span class="snippet-id">${snippet.id}</span>
                     <span class="snippet-owner">by @${snippet.owner}</span>
                 </div>
-                <div class="snippet-preview">${snippet.preview || snippet.code.substring(0, 100) + '...'}</div>
+                <div class="snippet-preview">${preview}</div>
                 ${actions}
                 <small>Created: ${date}</small>
             `;
@@ -1095,6 +1141,7 @@ HTML_TEMPLATE = """
                     headers: {
                         'Content-Type': 'application/json',
                     },
+                    credentials: 'include',
                     body: JSON.stringify({ code: code })
                 });
                 
@@ -1117,7 +1164,8 @@ HTML_TEMPLATE = """
             
             try {
                 const response = await fetch(`/api/snippets/${id}`, {
-                    method: 'DELETE'
+                    method: 'DELETE',
+                    credentials: 'include'
                 });
                 
                 if (response.ok) {
@@ -1172,36 +1220,61 @@ def index():
 
 @app.route('/api/signup', methods=['POST'])
 def signup():
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
+    try:
+        data = request.json
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        
+        print(f"Signup attempt - Username: {username}")  # Debug log
+        
+        if not username or not password:
+            return jsonify({'error': 'Username and password required'}), 400
+        
+        if len(username) < 3:
+            return jsonify({'error': 'Username must be at least 3 characters'}), 400
+        
+        if len(password) < 4:
+            return jsonify({'error': 'Password must be at least 4 characters'}), 400
+        
+        if username in users_db:
+            return jsonify({'error': 'Username already exists'}), 400
+        
+        # Create new user
+        users_db[username] = {
+            'password': password,
+            'created_at': datetime.now().timestamp(),
+            'snippets': {}
+        }
+        
+        print(f"User created successfully: {username}")  # Debug log
+        print(f"Total users now: {len(users_db)}")  # Debug log
+        
+        return jsonify({'success': True, 'message': 'Account created successfully'})
     
-    if not username or not password:
-        return jsonify({'error': 'Username and password required'}), 400
-    
-    if username in users_db:
-        return jsonify({'error': 'Username already exists'}), 400
-    
-    # Create new user
-    users_db[username] = {
-        'password': password,
-        'created_at': datetime.now().timestamp(),
-        'snippets': {}
-    }
-    
-    return jsonify({'success': True, 'message': 'Account created'})
+    except Exception as e:
+        print(f"Signup error: {str(e)}")  # Debug log
+        return jsonify({'error': 'Server error'}), 500
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
+    try:
+        data = request.json
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        
+        print(f"Login attempt - Username: {username}")  # Debug log
+        
+        if username in users_db and users_db[username]['password'] == password:
+            session['user'] = username
+            print(f"Login successful: {username}")  # Debug log
+            return jsonify({'success': True, 'username': username})
+        
+        print(f"Login failed for: {username}")  # Debug log
+        return jsonify({'error': 'Invalid username or password'}), 401
     
-    if username in users_db and users_db[username]['password'] == password:
-        session['user'] = username
-        return jsonify({'success': True, 'username': username})
-    
-    return jsonify({'error': 'Invalid credentials'}), 401
+    except Exception as e:
+        print(f"Login error: {str(e)}")  # Debug log
+        return jsonify({'error': 'Server error'}), 500
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
@@ -1333,6 +1406,9 @@ def get_snippet(snippet_id):
     return "Snippet not found", 404
 
 if __name__ == '__main__':
+    print("="*50)
     print("🚀 Server starting...")
     print("📍 Open http://localhost:5000 in your browser")
+    print("📝 Sign up with any username/password")
+    print("="*50)
     app.run(debug=True, host='0.0.0.0', port=5000)
