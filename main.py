@@ -789,6 +789,16 @@ HTML_TEMPLATE = """
     </script>
 </body>
 </html>
+<div class="credit">
+<p>👨‍💻 Developer :
+<span class="tg" onclick="window.open('https://t.me/Aotpy','_blank')">@Aotpy</span></p>
+
+<p>🌐 Portfolio :
+<span class="tg" onclick="window.open('https://aotpy.vercel.app','_blank')">Portfolio</span></p>
+
+<p>📢 Channel :
+<span class="tg" onclick="window.open('https://t.me/obitostuffs','_blank')">@obitostuffs</span></p>
+
 """
 
 @app.route('/')
