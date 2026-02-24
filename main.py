@@ -1,25 +1,22 @@
-from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
+from flask import Flask, request, jsonify, render_template_string, session
 from flask_cors import CORS
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = 'aotpy-secret-key-2024'  # Change this in production
 CORS(app)
 
-# Store code snippets (permanent storage - kabhi delete nahi honge)
-code_snippets = {}
-
-# Single user credentials (simple - change karo apne hisaab se)
-USERNAME = "admin"
-PASSWORD = "admin123"  # Change this to your password
+# Store users and their snippets
+users_db = {}  # username: {password: hash, snippets: {}}
+snippets_db = {}  # Global snippets storage with user_id
 
 # Login required decorator
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'logged_in' not in session:
+        if 'user' not in session:
             return jsonify({'error': 'Please login first'}), 401
         return f(*args, **kwargs)
     return decorated_function
@@ -30,7 +27,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Python Code Snippet Manager</title>
+    <title>Public Python Code Snippet Manager</title>
     <style>
         * {
             margin: 0;
@@ -79,10 +76,13 @@ HTML_TEMPLATE = """
             background: rgba(255,255,255,0.2);
             padding: 8px 15px;
             border-radius: 50px;
-            font-size: 0.9em;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 15px;
+        }
+        
+        .username {
+            font-weight: bold;
         }
         
         .logout-btn {
@@ -92,14 +92,9 @@ HTML_TEMPLATE = """
             padding: 5px 10px;
             border-radius: 5px;
             cursor: pointer;
-            font-size: 0.8em;
         }
         
-        .logout-btn:hover {
-            background: rgba(255,255,255,0.4);
-        }
-        
-        .login-container {
+        .auth-container {
             max-width: 400px;
             margin: 50px auto;
             padding: 30px;
@@ -108,13 +103,37 @@ HTML_TEMPLATE = """
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
         }
         
-        .login-container h2 {
-            color: #667eea;
-            margin-bottom: 20px;
-            text-align: center;
+        .auth-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 10px;
         }
         
-        .login-input {
+        .auth-tab {
+            flex: 1;
+            text-align: center;
+            padding: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            color: #666;
+        }
+        
+        .auth-tab.active {
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+        }
+        
+        .auth-form {
+            display: none;
+        }
+        
+        .auth-form.active {
+            display: block;
+        }
+        
+        .auth-input {
             width: 100%;
             padding: 12px;
             margin-bottom: 15px;
@@ -123,12 +142,12 @@ HTML_TEMPLATE = """
             font-size: 1em;
         }
         
-        .login-input:focus {
+        .auth-input:focus {
             outline: none;
             border-color: #667eea;
         }
         
-        .login-btn {
+        .auth-btn {
             width: 100%;
             padding: 12px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -140,12 +159,19 @@ HTML_TEMPLATE = """
             transition: transform 0.2s;
         }
         
-        .login-btn:hover {
+        .auth-btn:hover {
             transform: translateY(-2px);
         }
         
         .error-msg {
             color: #dc3545;
+            text-align: center;
+            margin-top: 10px;
+            display: none;
+        }
+        
+        .success-msg {
+            color: #28a745;
             text-align: center;
             margin-top: 10px;
             display: none;
@@ -234,30 +260,6 @@ HTML_TEMPLATE = """
             background: #e8eaf6;
             border-radius: 5px;
             display: none;
-        }
-        
-        .options {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
-        
-        .option-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .option-item input[type="radio"] {
-            width: auto;
-            margin-right: 5px;
-        }
-        
-        .option-item label {
-            display: inline;
-            margin-bottom: 0;
-            font-weight: normal;
         }
         
         button {
@@ -349,16 +351,12 @@ HTML_TEMPLATE = """
             font-weight: bold;
         }
         
-        .snippet-type {
+        .snippet-owner {
+            font-size: 0.8em;
+            color: #666;
+            background: #f0f0f0;
             padding: 3px 8px;
             border-radius: 4px;
-            font-size: 0.8em;
-            font-weight: bold;
-        }
-        
-        .type-permanent {
-            background: #28a745;
-            color: white;
         }
         
         .snippet-preview {
@@ -387,6 +385,31 @@ HTML_TEMPLATE = """
             padding: 20px;
             margin-top: 20px;
             border-left: 4px solid #667eea;
+        }
+        
+        .stats-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
         }
         
         .footer {
@@ -427,10 +450,6 @@ HTML_TEMPLATE = """
             text-decoration: none;
         }
         
-        .contact-value:hover {
-            color: #667eea;
-        }
-        
         .portfolio-link {
             display: inline-block;
             margin-top: 20px;
@@ -440,12 +459,6 @@ HTML_TEMPLATE = """
             text-decoration: none;
             border-radius: 50px;
             font-weight: bold;
-        }
-        
-        .disclaimer {
-            margin-top: 20px;
-            font-size: 0.8em;
-            color: #a0aec0;
         }
         
         .search-box {
@@ -460,33 +473,69 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 Python Code Snippet Manager</h1>
-            <p>Store, Edit & Execute Python Code Remotely</p>
+            <h1>🚀 Public Python Code Snippet Manager</h1>
+            <p>Create, Share & Execute Python Code - Free for Everyone!</p>
             
             <div class="user-status" id="userStatus" style="display: none;">
-                <span id="username"></span>
+                <span class="username" id="username"></span>
                 <button class="logout-btn" onclick="logout()">Logout</button>
             </div>
         </div>
         
-        <!-- Login Page -->
-        <div id="loginPage">
-            <div class="login-container">
-                <h2>🔐 Login</h2>
-                <input type="text" id="username" class="login-input" placeholder="Username" value="admin">
-                <input type="password" id="password" class="login-input" placeholder="Password" value="admin123">
-                <button class="login-btn" onclick="login()">Login</button>
-                <div id="loginError" class="error-msg">Invalid credentials!</div>
+        <!-- Auth Page -->
+        <div id="authPage">
+            <div class="auth-container">
+                <div class="auth-tabs">
+                    <div class="auth-tab active" onclick="switchAuthTab('login')">Login</div>
+                    <div class="auth-tab" onclick="switchAuthTab('signup')">Sign Up</div>
+                </div>
+                
+                <!-- Login Form -->
+                <div id="loginForm" class="auth-form active">
+                    <h2 style="text-align: center; margin-bottom: 20px;">🔐 Welcome Back!</h2>
+                    <input type="text" id="loginUsername" class="auth-input" placeholder="Username">
+                    <input type="password" id="loginPassword" class="auth-input" placeholder="Password">
+                    <button class="auth-btn" onclick="login()">Login</button>
+                    <div id="loginError" class="error-msg">Invalid credentials!</div>
+                </div>
+                
+                <!-- Signup Form -->
+                <div id="signupForm" class="auth-form">
+                    <h2 style="text-align: center; margin-bottom: 20px;">📝 Create Account</h2>
+                    <input type="text" id="signupUsername" class="auth-input" placeholder="Choose Username">
+                    <input type="password" id="signupPassword" class="auth-input" placeholder="Choose Password">
+                    <input type="password" id="signupConfirmPassword" class="auth-input" placeholder="Confirm Password">
+                    <button class="auth-btn" onclick="signup()">Sign Up</button>
+                    <div id="signupError" class="error-msg"></div>
+                    <div id="signupSuccess" class="success-msg">Account created! Please login.</div>
+                </div>
             </div>
         </div>
         
         <!-- Main App (Hidden until login) -->
         <div id="mainApp" style="display: none;">
             <div class="main-content">
+                <!-- Stats Bar -->
+                <div class="stats-bar">
+                    <div class="stat-item">
+                        <div class="stat-value" id="userSnippetCount">0</div>
+                        <div class="stat-label">Your Snippets</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="totalSnippetCount">0</div>
+                        <div class="stat-label">Total Snippets</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="userCount">0</div>
+                        <div class="stat-label">Total Users</div>
+                    </div>
+                </div>
+                
                 <div class="tabs">
                     <div class="tab active" onclick="switchTab('create')">📝 Create New</div>
-                    <div class="tab" onclick="switchTab('manage')">🔧 Manage Snippets</div>
+                    <div class="tab" onclick="switchTab('manage')">🔧 My Snippets</div>
                     <div class="tab" onclick="switchTab('upload')">📁 Upload File</div>
+                    <div class="tab" onclick="switchTab('public')">🌍 Public Snippets</div>
                 </div>
                 
                 <!-- Create New Tab -->
@@ -495,13 +544,6 @@ HTML_TEMPLATE = """
                         <div class="input-group">
                             <label>📝 Your Python Code:</label>
                             <textarea id="code" rows="10" placeholder="print('Hello, World!')"></textarea>
-                        </div>
-                        
-                        <div class="options">
-                            <div class="option-item">
-                                <input type="radio" name="storage" id="permanent" value="permanent" checked>
-                                <label for="permanent">💾 Permanent Storage</label>
-                            </div>
                         </div>
                         
                         <button onclick="createSnippet()">🔗 Generate Link</button>
@@ -528,16 +570,29 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
                 
-                <!-- Manage Snippets Tab -->
+                <!-- My Snippets Tab -->
                 <div id="manage-tab" class="tab-content">
                     <div class="input-section">
-                        <input type="text" class="search-box" placeholder="🔍 Search snippets..." onkeyup="searchSnippets(this.value)">
+                        <input type="text" class="search-box" placeholder="🔍 Search my snippets..." onkeyup="searchMySnippets(this.value)">
                         
-                        <div class="snippet-list" id="snippetList">
-                            <!-- Snippets will be loaded here -->
+                        <div class="snippet-list" id="mySnippetList">
+                            <!-- My snippets will be loaded here -->
                         </div>
                         
-                        <button class="secondary" onclick="loadSnippets()">🔄 Refresh List</button>
+                        <button class="secondary" onclick="loadMySnippets()">🔄 Refresh</button>
+                    </div>
+                </div>
+                
+                <!-- Public Snippets Tab -->
+                <div id="public-tab" class="tab-content">
+                    <div class="input-section">
+                        <input type="text" class="search-box" placeholder="🔍 Search all public snippets..." onkeyup="searchPublicSnippets(this.value)">
+                        
+                        <div class="snippet-list" id="publicSnippetList">
+                            <!-- Public snippets will be loaded here -->
+                        </div>
+                        
+                        <button class="secondary" onclick="loadPublicSnippets()">🔄 Refresh</button>
                     </div>
                 </div>
                 
@@ -588,7 +643,7 @@ HTML_TEMPLATE = """
                     <div class="disclaimer">
                         ⚠️ Disclaimer: Only execute code from trusted sources.
                         <br>
-                        Made with ❤️ by Aotpy
+                        Made with ❤️ by Aotpy | Public Tool - Free for Everyone
                     </div>
                 </div>
             </div>
@@ -610,30 +665,92 @@ HTML_TEMPLATE = """
                 
                 if (data.logged_in) {
                     showMainApp(data.username);
+                    loadStats();
                 } else {
-                    showLogin();
+                    showAuth();
                 }
             } catch (error) {
-                showLogin();
+                showAuth();
             }
         }
         
-        function showLogin() {
-            document.getElementById('loginPage').style.display = 'block';
+        function showAuth() {
+            document.getElementById('authPage').style.display = 'block';
             document.getElementById('mainApp').style.display = 'none';
             document.getElementById('userStatus').style.display = 'none';
         }
         
         function showMainApp(username) {
-            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('authPage').style.display = 'none';
             document.getElementById('mainApp').style.display = 'block';
             document.getElementById('userStatus').style.display = 'flex';
             document.getElementById('username').textContent = username;
         }
         
+        function switchAuthTab(tab) {
+            document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+            
+            if (tab === 'login') {
+                document.querySelectorAll('.auth-tab')[0].classList.add('active');
+                document.getElementById('loginForm').classList.add('active');
+            } else {
+                document.querySelectorAll('.auth-tab')[1].classList.add('active');
+                document.getElementById('signupForm').classList.add('active');
+            }
+        }
+        
+        async function signup() {
+            const username = document.getElementById('signupUsername').value.trim();
+            const password = document.getElementById('signupPassword').value;
+            const confirm = document.getElementById('signupConfirmPassword').value;
+            
+            if (!username || !password) {
+                showError('signupError', 'Please fill all fields');
+                return;
+            }
+            
+            if (password !== confirm) {
+                showError('signupError', 'Passwords do not match');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/signup', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('signupSuccess').style.display = 'block';
+                    document.getElementById('signupError').style.display = 'none';
+                    
+                    // Clear form
+                    document.getElementById('signupUsername').value = '';
+                    document.getElementById('signupPassword').value = '';
+                    document.getElementById('signupConfirmPassword').value = '';
+                    
+                    // Switch to login tab after 2 seconds
+                    setTimeout(() => {
+                        switchAuthTab('login');
+                        document.getElementById('signupSuccess').style.display = 'none';
+                    }, 2000);
+                } else {
+                    showError('signupError', data.error);
+                }
+            } catch (error) {
+                showError('signupError', 'Error creating account');
+            }
+        }
+        
         async function login() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
             
             try {
                 const response = await fetch('/api/login', {
@@ -648,6 +765,7 @@ HTML_TEMPLATE = """
                 
                 if (response.ok) {
                     showMainApp(username);
+                    loadStats();
                 } else {
                     document.getElementById('loginError').style.display = 'block';
                 }
@@ -658,7 +776,13 @@ HTML_TEMPLATE = """
         
         async function logout() {
             await fetch('/api/logout', { method: 'POST' });
-            showLogin();
+            showAuth();
+        }
+        
+        function showError(elementId, message) {
+            const errorDiv = document.getElementById(elementId);
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
         }
         
         // Tab switching
@@ -672,10 +796,27 @@ HTML_TEMPLATE = """
             } else if (tab === 'manage') {
                 document.querySelectorAll('.tab')[1].classList.add('active');
                 document.getElementById('manage-tab').classList.add('active');
-                loadSnippets();
+                loadMySnippets();
             } else if (tab === 'upload') {
                 document.querySelectorAll('.tab')[2].classList.add('active');
                 document.getElementById('upload-tab').classList.add('active');
+            } else if (tab === 'public') {
+                document.querySelectorAll('.tab')[3].classList.add('active');
+                document.getElementById('public-tab').classList.add('active');
+                loadPublicSnippets();
+            }
+        }
+        
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const stats = await response.json();
+                
+                document.getElementById('userSnippetCount').textContent = stats.user_snippets;
+                document.getElementById('totalSnippetCount').textContent = stats.total_snippets;
+                document.getElementById('userCount').textContent = stats.total_users;
+            } catch (error) {
+                console.error('Error loading stats:', error);
             }
         }
         
@@ -724,8 +865,8 @@ HTML_TEMPLATE = """
                 });
                 
                 if (response.status === 401) {
-                    alert('Please login first!');
-                    showLogin();
+                    alert('Session expired! Please login again.');
+                    showAuth();
                     return;
                 }
                 
@@ -744,6 +885,9 @@ HTML_TEMPLATE = """
                     document.getElementById('fileInput').value = '';
                     document.getElementById('fileInfo').style.display = 'none';
                     selectedFile = null;
+                    
+                    // Refresh stats
+                    loadStats();
                 } else {
                     alert('Error: ' + data.error);
                 }
@@ -752,42 +896,27 @@ HTML_TEMPLATE = """
             }
         }
         
-        async function loadSnippets() {
+        async function loadMySnippets() {
             try {
-                const response = await fetch('/api/snippets/list');
+                const response = await fetch('/api/my-snippets');
                 
                 if (response.status === 401) {
-                    showLogin();
+                    showAuth();
                     return;
                 }
                 
                 const snippets = await response.json();
                 
-                const snippetList = document.getElementById('snippetList');
+                const snippetList = document.getElementById('mySnippetList');
                 snippetList.innerHTML = '';
                 
                 if (snippets.length === 0) {
-                    snippetList.innerHTML = '<p style="text-align: center;">No snippets found</p>';
+                    snippetList.innerHTML = '<p style="text-align: center;">You haven\'t created any snippets yet</p>';
                     return;
                 }
                 
                 snippets.forEach(snippet => {
-                    const div = document.createElement('div');
-                    div.className = 'snippet-item';
-                    div.innerHTML = `
-                        <div class="snippet-item-header">
-                            <span class="snippet-id">${snippet.id}</span>
-                            <span class="snippet-type type-permanent">Permanent</span>
-                        </div>
-                        <div class="snippet-preview">${snippet.preview}</div>
-                        <div class="snippet-actions">
-                            <button class="success" onclick="editSnippet('${snippet.id}')">✏️ Edit</button>
-                            <button class="danger" onclick="deleteSnippet('${snippet.id}')">🗑️ Delete</button>
-                            <button onclick="viewSnippet('${snippet.id}')">👁️ View</button>
-                            <button onclick="copySnippetUrl('${snippet.id}')">🔗 Copy URL</button>
-                        </div>
-                        <small>Created: ${new Date(snippet.created_at * 1000).toLocaleString()}</small>
-                    `;
+                    const div = createSnippetElement(snippet, true);
                     snippetList.appendChild(div);
                 });
             } catch (error) {
@@ -795,8 +924,74 @@ HTML_TEMPLATE = """
             }
         }
         
-        function searchSnippets(query) {
-            const items = document.querySelectorAll('.snippet-item');
+        async function loadPublicSnippets() {
+            try {
+                const response = await fetch('/api/public-snippets');
+                const snippets = await response.json();
+                
+                const snippetList = document.getElementById('publicSnippetList');
+                snippetList.innerHTML = '';
+                
+                if (snippets.length === 0) {
+                    snippetList.innerHTML = '<p style="text-align: center;">No public snippets yet</p>';
+                    return;
+                }
+                
+                snippets.forEach(snippet => {
+                    const div = createSnippetElement(snippet, false);
+                    snippetList.appendChild(div);
+                });
+            } catch (error) {
+                alert('Error loading snippets: ' + error);
+            }
+        }
+        
+        function createSnippetElement(snippet, isOwner) {
+            const div = document.createElement('div');
+            div.className = 'snippet-item';
+            
+            let actions = '';
+            if (isOwner) {
+                actions = `
+                    <div class="snippet-actions">
+                        <button class="success" onclick="editSnippet('${snippet.id}')">✏️ Edit</button>
+                        <button class="danger" onclick="deleteSnippet('${snippet.id}')">🗑️ Delete</button>
+                        <button onclick="viewSnippet('${snippet.id}')">👁️ View</button>
+                        <button onclick="copySnippetUrl('${snippet.id}')">🔗 Copy URL</button>
+                    </div>
+                `;
+            } else {
+                actions = `
+                    <div class="snippet-actions">
+                        <button onclick="viewSnippet('${snippet.id}')">👁️ View</button>
+                        <button onclick="copySnippetUrl('${snippet.id}')">🔗 Copy URL</button>
+                    </div>
+                `;
+            }
+            
+            div.innerHTML = `
+                <div class="snippet-item-header">
+                    <span class="snippet-id">${snippet.id}</span>
+                    <span class="snippet-owner">by @${snippet.owner}</span>
+                </div>
+                <div class="snippet-preview">${snippet.preview}</div>
+                ${actions}
+                <small>Created: ${new Date(snippet.created_at * 1000).toLocaleString()}</small>
+            `;
+            
+            return div;
+        }
+        
+        function searchMySnippets(query) {
+            searchSnippets('mySnippetList', query);
+        }
+        
+        function searchPublicSnippets(query) {
+            searchSnippets('publicSnippetList', query);
+        }
+        
+        function searchSnippets(listId, query) {
+            const items = document.querySelectorAll(`#${listId} .snippet-item`);
             items.forEach(item => {
                 const text = item.textContent.toLowerCase();
                 item.style.display = text.includes(query.toLowerCase()) ? 'block' : 'none';
@@ -838,7 +1033,8 @@ HTML_TEMPLATE = """
                 if (response.ok) {
                     alert('✅ Snippet updated!');
                     cancelEdit();
-                    loadSnippets();
+                    loadMySnippets();
+                    loadPublicSnippets();
                 } else {
                     alert('Error updating snippet');
                 }
@@ -857,7 +1053,9 @@ HTML_TEMPLATE = """
                 
                 if (response.ok) {
                     alert('✅ Snippet deleted!');
-                    loadSnippets();
+                    loadMySnippets();
+                    loadPublicSnippets();
+                    loadStats();
                 }
             } catch (error) {
                 alert('Error: ' + error);
@@ -889,11 +1087,28 @@ HTML_TEMPLATE = """
 </html>
 """
 
-@app.route('/')
-def index():
-    return render_template_string(HTML_TEMPLATE)
+# ========== AUTH ROUTES ==========
 
-# ========== LOGIN ROUTES ==========
+@app.route('/api/signup', methods=['POST'])
+def signup():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        return jsonify({'error': 'Username and password required'}), 400
+    
+    if username in users_db:
+        return jsonify({'error': 'Username already exists'}), 400
+    
+    # Create new user
+    users_db[username] = {
+        'password': password,  # In production, use password hashing
+        'created_at': datetime.now().timestamp(),
+        'snippets': {}
+    }
+    
+    return jsonify({'success': True, 'message': 'Account created'})
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -901,9 +1116,8 @@ def login():
     username = data.get('username')
     password = data.get('password')
     
-    if username == USERNAME and password == PASSWORD:
-        session['logged_in'] = True
-        session['username'] = username
+    if username in users_db and users_db[username]['password'] == password:
+        session['user'] = username
         return jsonify({'success': True, 'username': username})
     
     return jsonify({'error': 'Invalid credentials'}), 401
@@ -915,15 +1129,37 @@ def logout():
 
 @app.route('/api/check-auth', methods=['GET'])
 def check_auth():
-    if 'logged_in' in session:
-        return jsonify({'logged_in': True, 'username': session.get('username')})
+    if 'user' in session:
+        return jsonify({'logged_in': True, 'username': session['user']})
     return jsonify({'logged_in': False})
 
-# ========== SNIPPET ROUTES (Protected) ==========
+# ========== STATS ROUTES ==========
+
+@app.route('/api/stats', methods=['GET'])
+@login_required
+def get_stats():
+    current_user = session['user']
+    
+    # Count user's snippets
+    user_snippets = len(users_db[current_user]['snippets'])
+    
+    # Count total snippets
+    total_snippets = 0
+    for user in users_db.values():
+        total_snippets += len(user['snippets'])
+    
+    return jsonify({
+        'user_snippets': user_snippets,
+        'total_snippets': total_snippets,
+        'total_users': len(users_db)
+    })
+
+# ========== SNIPPET ROUTES ==========
 
 @app.route('/api/snippets', methods=['POST'])
 @login_required
 def create_snippet():
+    current_user = session['user']
     data = request.json
     code = data.get('code')
     
@@ -933,24 +1169,49 @@ def create_snippet():
     # Generate unique ID
     snippet_id = str(uuid.uuid4())[:8]
     
-    # Store the snippet (permanent - kabhi nahi hatega)
-    code_snippets[snippet_id] = {
+    # Store snippet with owner info
+    snippet_data = {
+        'id': snippet_id,
         'code': code,
+        'owner': current_user,
         'created_at': datetime.now().timestamp(),
-        'storage_type': 'permanent',
         'preview': code[:100] + '...' if len(code) > 100 else code
     }
     
+    # Store in user's snippets
+    users_db[current_user]['snippets'][snippet_id] = snippet_data
+    
     return jsonify({
         'id': snippet_id,
-        'storage_type': 'permanent'
+        'owner': current_user
     })
+
+@app.route('/api/my-snippets', methods=['GET'])
+@login_required
+def get_my_snippets():
+    current_user = session['user']
+    snippets = list(users_db[current_user]['snippets'].values())
+    return jsonify(snippets)
+
+@app.route('/api/public-snippets', methods=['GET'])
+def get_public_snippets():
+    all_snippets = []
+    for user, user_data in users_db.items():
+        for snippet in user_data['snippets'].values():
+            all_snippets.append(snippet)
+    
+    # Sort by newest first
+    all_snippets.sort(key=lambda x: x['created_at'], reverse=True)
+    return jsonify(all_snippets)
 
 @app.route('/api/snippets/<snippet_id>', methods=['PUT'])
 @login_required
 def update_snippet(snippet_id):
-    if snippet_id not in code_snippets:
-        return jsonify({'error': 'Snippet not found'}), 404
+    current_user = session['user']
+    
+    # Check if snippet exists and belongs to user
+    if snippet_id not in users_db[current_user]['snippets']:
+        return jsonify({'error': 'Snippet not found or unauthorized'}), 404
     
     data = request.json
     new_code = data.get('code')
@@ -958,47 +1219,37 @@ def update_snippet(snippet_id):
     if not new_code:
         return jsonify({'error': 'No code provided'}), 400
     
-    # Update the snippet
-    code_snippets[snippet_id]['code'] = new_code
-    code_snippets[snippet_id]['preview'] = new_code[:100] + '...' if len(new_code) > 100 else new_code
-    code_snippets[snippet_id]['updated_at'] = datetime.now().timestamp()
+    # Update snippet
+    users_db[current_user]['snippets'][snippet_id]['code'] = new_code
+    users_db[current_user]['snippets'][snippet_id]['preview'] = new_code[:100] + '...' if len(new_code) > 100 else new_code
+    users_db[current_user]['snippets'][snippet_id]['updated_at'] = datetime.now().timestamp()
     
-    return jsonify({'message': 'Snippet updated successfully'})
+    return jsonify({'message': 'Snippet updated'})
 
 @app.route('/api/snippets/<snippet_id>', methods=['DELETE'])
 @login_required
 def delete_snippet(snippet_id):
-    if snippet_id in code_snippets:
-        del code_snippets[snippet_id]
-        return jsonify({'message': 'Snippet deleted'})
-    return jsonify({'error': 'Snippet not found'}), 404
-
-@app.route('/api/snippets/list', methods=['GET'])
-@login_required
-def list_snippets():
-    # Return all snippets (permanent - kabhi delete nahi honge)
-    snippets_list = []
-    for snippet_id, snippet in code_snippets.items():
-        snippets_list.append({
-            'id': snippet_id,
-            'created_at': snippet['created_at'],
-            'storage_type': 'permanent',
-            'preview': snippet['preview']
-        })
+    current_user = session['user']
     
-    return jsonify(snippets_list)
+    # Check if snippet exists and belongs to user
+    if snippet_id not in users_db[current_user]['snippets']:
+        return jsonify({'error': 'Snippet not found or unauthorized'}), 404
+    
+    # Delete snippet
+    del users_db[current_user]['snippets'][snippet_id]
+    
+    return jsonify({'message': 'Snippet deleted'})
 
-# ========== PUBLIC ROUTE (No login required for viewing) ==========
+# ========== PUBLIC ROUTE (No login required) ==========
 
 @app.route('/snippet/<snippet_id>')
 def get_snippet(snippet_id):
-    snippet = code_snippets.get(snippet_id)
+    # Search for snippet in all users
+    for user, user_data in users_db.items():
+        if snippet_id in user_data['snippets']:
+            return user_data['snippets'][snippet_id]['code'], 200, {'Content-Type': 'text/plain'}
     
-    if not snippet:
-        return "Snippet not found", 404
-    
-    # Return the code as plain text (public - koi bhi dekh sakta hai)
-    return snippet['code'], 200, {'Content-Type': 'text/plain'}
+    return "Snippet not found", 404
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
