@@ -1,22 +1,54 @@
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 import uuid
+import json
+import os
 from datetime import datetime
-import base64
 
 app = Flask(__name__)
 CORS(app)
 
-# Permanent storage
-snippets = {}
+# JSON file for permanent storage
+DATA_FILE = 'snippets.json'
+
+# Ensure snippets.json exists
+def ensure_json_file():
+    if not os.path.exists(DATA_FILE):
+        with open(DATA_FILE, 'w') as f:
+            json.dump({}, f)
+        print(f"✅ Created new {DATA_FILE} file")
+    else:
+        print(f"📁 {DATA_FILE} already exists")
+
+# Load snippets from JSON file
+def load_snippets():
+    ensure_json_file()
+    try:
+        with open(DATA_FILE, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"⚠️ Error loading JSON: {e}")
+        return {}
+
+# Save snippets to JSON file
+def save_snippets(snippets):
+    try:
+        with open(DATA_FILE, 'w') as f:
+            json.dump(snippets, f, indent=2)
+        print(f"💾 Saved to {DATA_FILE}")
+    except Exception as e:
+        print(f"❌ Error saving: {e}")
+
+# Initialize snippets from file
+snippets = load_snippets()
 
 HTML = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>Permanent Snippet Manager</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Permanent JSON Snippet Manager</title>
     <style>
         * {
             margin: 0;
@@ -25,7 +57,7 @@ HTML = """
         }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 10px;
@@ -41,22 +73,14 @@ HTML = """
         }
         
         @media (min-width: 768px) {
-            .container {
-                padding: 30px;
-            }
+            .container { padding: 30px; }
         }
         
         h1 {
             text-align: center;
             color: #667eea;
             font-size: 24px;
-            margin-bottom: 10px;
-        }
-        
-        @media (min-width: 768px) {
-            h1 {
-                font-size: 32px;
-            }
+            margin-bottom: 5px;
         }
         
         .subtitle {
@@ -66,7 +90,17 @@ HTML = """
             font-size: 14px;
         }
         
-        /* Stats Cards */
+        .json-badge {
+            background: #28a745;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 50px;
+            display: inline-block;
+            margin: 0 auto 20px;
+            text-align: center;
+            font-size: 14px;
+        }
+        
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -77,7 +111,6 @@ HTML = """
         @media (min-width: 768px) {
             .stats-grid {
                 grid-template-columns: repeat(4, 1fr);
-                gap: 15px;
             }
         }
         
@@ -100,7 +133,6 @@ HTML = """
             margin-top: 5px;
         }
         
-        /* Tabs */
         .tabs {
             display: flex;
             overflow-x: auto;
@@ -121,13 +153,6 @@ HTML = """
             transition: all 0.3s;
         }
         
-        @media (min-width: 768px) {
-            .tab {
-                padding: 12px 25px;
-                font-size: 16px;
-            }
-        }
-        
         .tab.active {
             background: #667eea;
             color: white;
@@ -141,19 +166,6 @@ HTML = """
             display: block;
         }
         
-        /* Forms */
-        .input-group {
-            margin-bottom: 15px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 8px;
-            color: #333;
-            font-weight: 600;
-            font-size: 14px;
-        }
-        
         textarea {
             width: 100%;
             padding: 15px;
@@ -163,14 +175,9 @@ HTML = """
             font-size: 14px;
             resize: vertical;
             min-height: 150px;
+            margin-bottom: 15px;
         }
         
-        textarea:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        
-        /* File Upload */
         .file-upload-area {
             border: 2px dashed #667eea;
             border-radius: 12px;
@@ -178,12 +185,7 @@ HTML = """
             text-align: center;
             background: #f8f9fa;
             cursor: pointer;
-            transition: all 0.3s;
             margin-bottom: 15px;
-        }
-        
-        .file-upload-area:hover {
-            background: #e8eaf6;
         }
         
         .file-upload-icon {
@@ -200,7 +202,6 @@ HTML = """
             word-break: break-word;
         }
         
-        /* Buttons */
         .btn {
             background: #667eea;
             color: white;
@@ -211,8 +212,8 @@ HTML = """
             font-weight: 600;
             width: 100%;
             cursor: pointer;
-            transition: transform 0.2s;
             margin-bottom: 10px;
+            transition: transform 0.2s;
         }
         
         .btn:hover {
@@ -220,17 +221,16 @@ HTML = """
         }
         
         .btn-small {
-            padding: 10px 15px;
-            font-size: 14px;
+            padding: 8px 12px;
+            font-size: 12px;
             width: auto;
-            margin: 5px;
+            margin: 2px;
         }
         
         .btn-edit { background: #28a745; }
         .btn-delete { background: #dc3545; }
         .btn-copy { background: #17a2b8; }
         
-        /* Snippet Grid */
         .snippet-grid {
             display: grid;
             grid-template-columns: 1fr;
@@ -249,7 +249,6 @@ HTML = """
             border: 1px solid #e0e0e0;
             border-radius: 12px;
             padding: 15px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
         }
         
         .snippet-header {
@@ -291,20 +290,15 @@ HTML = """
         
         .snippet-actions {
             display: flex;
-            gap: 8px;
+            gap: 5px;
             flex-wrap: wrap;
-            margin-top: 15px;
         }
         
         .snippet-actions .btn-small {
             flex: 1;
-            min-width: 70px;
-            margin: 0;
-            font-size: 12px;
-            padding: 8px 5px;
+            min-width: 60px;
         }
         
-        /* Search */
         .search-box {
             width: 100%;
             padding: 15px;
@@ -314,7 +308,6 @@ HTML = """
             margin-bottom: 20px;
         }
         
-        /* Result Box */
         .result-box {
             background: linear-gradient(135deg, #667eea10 0%, #764ba210 100%);
             padding: 20px;
@@ -343,7 +336,6 @@ HTML = """
             margin: 10px 0;
         }
         
-        /* Footer */
         .footer {
             margin-top: 30px;
             padding: 20px;
@@ -372,30 +364,30 @@ HTML = """
             margin: 15px 0;
         }
         
-        /* Loading */
-        .loading {
-            text-align: center;
-            padding: 30px;
-            color: #666;
-        }
-        
-        /* Empty State */
         .empty-state {
             text-align: center;
             padding: 40px 20px;
             color: #999;
         }
         
-        .empty-icon {
-            font-size: 48px;
-            margin-bottom: 15px;
+        .permanent-badge {
+            background: #28a745;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            margin-left: 5px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🚀 Permanent Snippet Manager</h1>
-        <p class="subtitle">Create • Share • Execute • Never Deletes</p>
+        <h1>🚀 JSON Snippet Manager</h1>
+        <p class="subtitle">Create • Share • Execute • Permanent JSON Storage</p>
+        
+        <div style="text-align: center; margin-bottom: 20px;">
+            <span class="json-badge">💾 Saved in snippets.json</span>
+        </div>
         
         <!-- Stats -->
         <div class="stats-grid">
@@ -423,16 +415,12 @@ HTML = """
             <div class="tab" onclick="switchTab('upload')">📁 Upload</div>
             <div class="tab" onclick="switchTab('view')">👁️ All</div>
             <div class="tab" onclick="switchTab('search')">🔍 Search</div>
-            <div class="tab" onclick="switchTab('stats')">📊 Stats</div>
         </div>
         
         <!-- Create Tab -->
         <div id="createTab" class="tab-content active">
-            <div class="input-group">
-                <label>📝 Your Code:</label>
-                <textarea id="code" placeholder="# Write your Python code here
+            <textarea id="code" placeholder="# Write your Python code here
 print('Hello World!')"></textarea>
-            </div>
             <button class="btn" onclick="createSnippet()">🔗 Generate Permanent Link</button>
         </div>
         
@@ -441,16 +429,16 @@ print('Hello World!')"></textarea>
             <div class="file-upload-area" onclick="document.getElementById('fileInput').click()">
                 <div class="file-upload-icon">📂</div>
                 <h3>Tap to upload file</h3>
-                <p style="color: #666; font-size: 14px;">Supports .py, .txt files</p>
+                <p style="color: #666;">.py or .txt files</p>
                 <input type="file" id="fileInput" accept=".py,.txt" style="display: none;" onchange="handleFileSelect(event)">
             </div>
             
             <div class="file-info" id="fileInfo">
-                <strong>Selected:</strong> <span id="fileName"></span><br>
+                <strong>File:</strong> <span id="fileName"></span><br>
                 <strong>Size:</strong> <span id="fileSize"></span>
             </div>
             
-            <button class="btn" onclick="uploadFile()">📤 Upload & Generate Link</button>
+            <button class="btn" onclick="uploadFile()">📤 Upload & Save</button>
         </div>
         
         <!-- View All Tab -->
@@ -465,31 +453,9 @@ print('Hello World!')"></textarea>
             <div id="searchResults"></div>
         </div>
         
-        <!-- Stats Tab -->
-        <div id="statsTab" class="tab-content">
-            <div class="stats-grid" style="grid-template-columns: 1fr;">
-                <div class="stat-card">
-                    <div class="stat-value" id="totalSize">0 KB</div>
-                    <div class="stat-label">Total Size</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="avgSize">0 KB</div>
-                    <div class="stat-label">Average Size</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="oldestSnippet">-</div>
-                    <div class="stat-label">Oldest</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="newestSnippet">-</div>
-                    <div class="stat-label">Newest</div>
-                </div>
-            </div>
-        </div>
-        
         <!-- Result Box -->
         <div id="result" class="result-box">
-            <h3 style="margin-bottom: 15px;">✅ Link Generated (Permanent)</h3>
+            <h3 style="margin-bottom: 15px;">✅ Saved to JSON!</h3>
             
             <p><strong>🔗 Your URL:</strong></p>
             <div class="url-box" id="snippetUrl"></div>
@@ -498,8 +464,8 @@ print('Hello World!')"></textarea>
             <div class="code-box" id="execCode"></div>
             
             <div style="display: flex; gap: 10px;">
-                <button class="btn btn-small btn-copy" onclick="copyUrl()" style="flex: 1;">📋 Copy URL</button>
-                <button class="btn btn-small btn-copy" onclick="copyCode()" style="flex: 1;">📋 Copy Code</button>
+                <button class="btn-small btn-copy" onclick="copyUrl()" style="flex: 1;">📋 Copy URL</button>
+                <button class="btn-small btn-copy" onclick="copyCode()" style="flex: 1;">📋 Copy Code</button>
             </div>
         </div>
         
@@ -511,21 +477,20 @@ print('Hello World!')"></textarea>
                 <a href="https://Aotpy.vercel.app" target="_blank">🌐 Portfolio</a>
             </div>
             <p style="font-size: 12px; opacity: 0.8; margin-top: 15px;">
-                ⚠️ All snippets are permanent | Mobile & PC friendly
+                💾 Data permanently saved in <strong>snippets.json</strong> | Auto-create if not exists!
             </p>
         </div>
     </div>
 
     <script>
         const baseUrl = window.location.origin;
+        let selectedFile = null;
         
-        // Load on start
         window.onload = function() {
             loadAllSnippets();
             updateStats();
         };
         
-        // Tab switching
         function switchTab(tab) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -543,22 +508,15 @@ print('Hello World!')"></textarea>
             } else if (tab === 'search') {
                 document.querySelectorAll('.tab')[3].classList.add('active');
                 document.getElementById('searchTab').classList.add('active');
-            } else if (tab === 'stats') {
-                document.querySelectorAll('.tab')[4].classList.add('active');
-                document.getElementById('statsTab').classList.add('active');
-                updateDetailedStats();
             }
         }
         
-        // Create snippet
         async function createSnippet() {
             const code = document.getElementById('code').value.trim();
             if (!code) {
                 alert('Please enter some code!');
                 return;
             }
-            
-            showLoading();
             
             try {
                 const response = await fetch('/api/snippets', {
@@ -574,16 +532,12 @@ print('Hello World!')"></textarea>
                     document.getElementById('code').value = '';
                     loadAllSnippets();
                     updateStats();
-                } else {
-                    alert('Error: ' + data.error);
+                    alert('✅ Saved to snippets.json permanently!');
                 }
             } catch (error) {
                 alert('Error: ' + error);
             }
         }
-        
-        // File upload
-        let selectedFile = null;
         
         function handleFileSelect(event) {
             const file = event.target.files[0];
@@ -597,7 +551,7 @@ print('Hello World!')"></textarea>
         
         async function uploadFile() {
             if (!selectedFile) {
-                alert('Please select a file first!');
+                alert('Please select a file!');
                 return;
             }
             
@@ -605,33 +559,27 @@ print('Hello World!')"></textarea>
             reader.onload = async function(e) {
                 const code = e.target.result;
                 
-                try {
-                    const response = await fetch('/api/snippets', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ code: code })
-                    });
-                    
-                    const data = await response.json();
-                    
-                    if (response.ok) {
-                        showResult(data.id);
-                        document.getElementById('fileInput').value = '';
-                        document.getElementById('fileInfo').style.display = 'none';
-                        selectedFile = null;
-                        loadAllSnippets();
-                        updateStats();
-                    } else {
-                        alert('Error: ' + data.error);
-                    }
-                } catch (error) {
-                    alert('Error: ' + error);
+                const response = await fetch('/api/snippets', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ code: code })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult(data.id);
+                    document.getElementById('fileInput').value = '';
+                    document.getElementById('fileInfo').style.display = 'none';
+                    selectedFile = null;
+                    loadAllSnippets();
+                    updateStats();
+                    alert('✅ File saved to snippets.json!');
                 }
             };
             reader.readAsText(selectedFile);
         }
         
-        // Show result
         function showResult(id) {
             const url = `${baseUrl}/snippet/${id}`;
             const execCode = `import requests\\nexec(requests.get('${url}').text)`;
@@ -639,28 +587,22 @@ print('Hello World!')"></textarea>
             document.getElementById('snippetUrl').textContent = url;
             document.getElementById('execCode').textContent = execCode;
             document.getElementById('result').style.display = 'block';
-            
-            // Scroll to result
-            document.getElementById('result').scrollIntoView({ behavior: 'smooth' });
         }
         
-        // Load all snippets
         async function loadAllSnippets() {
             const container = document.getElementById('allSnippets');
-            container.innerHTML = '<div class="loading">Loading...</div>';
             
             try {
                 const response = await fetch('/api/all-snippets');
                 const snippets = await response.json();
                 
                 if (snippets.length === 0) {
-                    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📝</div><p>No snippets yet. Create one!</p></div>';
+                    container.innerHTML = '<div class="empty-state"><div class="file-upload-icon">📝</div><p>No snippets yet. Create one!</p></div>';
                     return;
                 }
                 
                 let html = '<div class="snippet-grid">';
                 
-                // Sort by newest first
                 snippets.reverse().forEach(s => {
                     const date = new Date(s.created_at * 1000).toLocaleString();
                     const preview = s.preview || s.code.substring(0, 100) + '...';
@@ -676,7 +618,7 @@ print('Hello World!')"></textarea>
                                 <button class="btn-small" onclick="viewSnippet('${s.id}')">👁️ View</button>
                                 <button class="btn-small btn-edit" onclick="editSnippet('${s.id}')">✏️ Edit</button>
                                 <button class="btn-small btn-delete" onclick="deleteSnippet('${s.id}')">🗑️ Del</button>
-                                <button class="btn-small btn-copy" onclick="copySnippetUrl('${s.id}')">🔗 URL</button>
+                                <button class="btn-small btn-copy" onclick="copyUrl('${s.id}')">🔗 URL</button>
                             </div>
                         </div>
                     `;
@@ -689,7 +631,6 @@ print('Hello World!')"></textarea>
             }
         }
         
-        // Search snippets
         async function searchSnippets() {
             const query = document.getElementById('searchInput').value.toLowerCase();
             
@@ -707,7 +648,7 @@ print('Hello World!')"></textarea>
             );
             
             if (filtered.length === 0) {
-                document.getElementById('searchResults').innerHTML = '<div class="empty-state">No matches found</div>';
+                document.getElementById('searchResults').innerHTML = '<div class="empty-state">No matches</div>';
                 return;
             }
             
@@ -728,7 +669,7 @@ print('Hello World!')"></textarea>
                             <button class="btn-small" onclick="viewSnippet('${s.id}')">👁️ View</button>
                             <button class="btn-small btn-edit" onclick="editSnippet('${s.id}')">✏️ Edit</button>
                             <button class="btn-small btn-delete" onclick="deleteSnippet('${s.id}')">🗑️ Del</button>
-                            <button class="btn-small btn-copy" onclick="copySnippetUrl('${s.id}')">🔗 URL</button>
+                            <button class="btn-small btn-copy" onclick="copyUrl('${s.id}')">🔗 URL</button>
                         </div>
                     </div>
                 `;
@@ -738,7 +679,6 @@ print('Hello World!')"></textarea>
             document.getElementById('searchResults').innerHTML = html;
         }
         
-        // Update stats
         async function updateStats() {
             const response = await fetch('/api/all-snippets');
             const snippets = await response.json();
@@ -746,9 +686,9 @@ print('Hello World!')"></textarea>
             document.getElementById('totalSnippets').textContent = snippets.length;
             
             const now = new Date();
-            const today = now.setHours(0,0,0,0);
-            const weekAgo = now.setDate(now.getDate() - 7);
-            const monthAgo = now.setMonth(now.getMonth() - 1);
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            const weekAgo = now.getTime() - (7 * 24 * 60 * 60 * 1000);
+            const monthAgo = now.getTime() - (30 * 24 * 60 * 60 * 1000);
             
             let todayCount = 0, weekCount = 0, monthCount = 0;
             
@@ -764,26 +704,6 @@ print('Hello World!')"></textarea>
             document.getElementById('monthSnippets').textContent = monthCount;
         }
         
-        // Update detailed stats
-        async function updateDetailedStats() {
-            const response = await fetch('/api/all-snippets');
-            const snippets = await response.json();
-            
-            let totalSize = 0;
-            snippets.forEach(s => totalSize += s.code.length);
-            
-            document.getElementById('totalSize').textContent = (totalSize / 1024).toFixed(2) + ' KB';
-            document.getElementById('avgSize').textContent = snippets.length ? (totalSize / snippets.length / 1024).toFixed(2) + ' KB' : '0 KB';
-            
-            if (snippets.length) {
-                const oldest = new Date(Math.min(...snippets.map(s => s.created_at)) * 1000).toLocaleDateString();
-                const newest = new Date(Math.max(...snippets.map(s => s.created_at)) * 1000).toLocaleDateString();
-                document.getElementById('oldestSnippet').textContent = oldest;
-                document.getElementById('newestSnippet').textContent = newest;
-            }
-        }
-        
-        // Actions
         function viewSnippet(id) {
             window.open(`/snippet/${id}`, '_blank');
         }
@@ -792,53 +712,39 @@ print('Hello World!')"></textarea>
             const newCode = prompt('Edit your code:');
             if (!newCode) return;
             
-            try {
-                const response = await fetch(`/api/snippets/${id}`, {
-                    method: 'PUT',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ code: newCode })
-                });
-                
-                if (response.ok) {
-                    alert('✅ Updated!');
-                    loadAllSnippets();
-                    updateStats();
-                }
-            } catch (error) {
-                alert('Error: ' + error);
+            const response = await fetch(`/api/snippets/${id}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ code: newCode })
+            });
+            
+            if (response.ok) {
+                alert('✅ Updated in JSON!');
+                loadAllSnippets();
+                updateStats();
             }
         }
         
         async function deleteSnippet(id) {
-            if (!confirm('Permanently delete this snippet?')) return;
+            if (!confirm('Permanently delete from JSON?')) return;
             
-            try {
-                const response = await fetch(`/api/snippets/${id}`, {
-                    method: 'DELETE'
-                });
-                
-                if (response.ok) {
-                    alert('✅ Deleted!');
-                    loadAllSnippets();
-                    updateStats();
-                    if (document.getElementById('searchTab').classList.contains('active')) {
-                        searchSnippets();
-                    }
+            const response = await fetch(`/api/snippets/${id}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                alert('✅ Deleted from JSON!');
+                loadAllSnippets();
+                updateStats();
+                if (document.getElementById('searchTab').classList.contains('active')) {
+                    searchSnippets();
                 }
-            } catch (error) {
-                alert('Error: ' + error);
             }
         }
         
-        function copySnippetUrl(id) {
+        function copyUrl(id) {
             const url = `${baseUrl}/snippet/${id}`;
             navigator.clipboard.writeText(url);
-            alert('✅ URL copied!');
-        }
-        
-        function copyUrl() {
-            const text = document.getElementById('snippetUrl').textContent;
-            navigator.clipboard.writeText(text);
             alert('✅ URL copied!');
         }
         
@@ -846,11 +752,6 @@ print('Hello World!')"></textarea>
             const text = document.getElementById('execCode').textContent;
             navigator.clipboard.writeText(text);
             alert('✅ Code copied!');
-        }
-        
-        // Helper functions
-        function showLoading() {
-            // Add loading state if needed
         }
         
         function escapeHtml(text) {
@@ -869,9 +770,9 @@ print('Hello World!')"></textarea>
 def home():
     return render_template_string(HTML)
 
-# Create snippet
 @app.route('/api/snippets', methods=['POST'])
 def create_snippet():
+    global snippets
     data = request.json
     code = data.get('code', '').strip()
     
@@ -887,16 +788,16 @@ def create_snippet():
         'preview': code[:100] + '...' if len(code) > 100 else code
     }
     
+    save_snippets(snippets)
     return jsonify({'id': snippet_id})
 
-# Get all snippets
 @app.route('/api/all-snippets', methods=['GET'])
 def get_all_snippets():
     return jsonify(list(snippets.values()))
 
-# Update snippet
 @app.route('/api/snippets/<snippet_id>', methods=['PUT'])
 def update_snippet(snippet_id):
+    global snippets
     if snippet_id not in snippets:
         return jsonify({'error': 'Not found'}), 404
     
@@ -909,17 +810,18 @@ def update_snippet(snippet_id):
     snippets[snippet_id]['code'] = new_code
     snippets[snippet_id]['preview'] = new_code[:100] + '...' if len(new_code) > 100 else new_code
     
+    save_snippets(snippets)
     return jsonify({'success': True})
 
-# Delete snippet
 @app.route('/api/snippets/<snippet_id>', methods=['DELETE'])
 def delete_snippet(snippet_id):
+    global snippets
     if snippet_id in snippets:
         del snippets[snippet_id]
+        save_snippets(snippets)
         return jsonify({'success': True})
     return jsonify({'error': 'Not found'}), 404
 
-# Get single snippet
 @app.route('/snippet/<snippet_id>')
 def get_snippet(snippet_id):
     if snippet_id in snippets:
@@ -927,10 +829,17 @@ def get_snippet(snippet_id):
     return "Snippet not found", 404
 
 if __name__ == '__main__':
-    print("="*50)
-    print("✅ Mobile & PC Friendly Snippet Manager")
-    print("📍 Open: http://localhost:5000")
-    print("📝 Features: Create, Upload, Edit, Delete")
-    print("💾 Permanent Storage - Never Deletes")
-    print("="*50)
+    print("="*60)
+    print("✅ JSON PERMANENT STORAGE SNIPPET MANAGER")
+    print("="*60)
+    print(f"📍 Open: http://localhost:5000")
+    print(f"📁 Data file: {DATA_FILE}")
+    print(f"📊 Total snippets loaded: {len(snippets)}")
+    print("="*60)
+    print("💾 Features:")
+    print("   • ✅ Auto-create snippets.json if not exists")
+    print("   • ✅ Server restart se bhi data safe!")
+    print("   • ✅ Har action ke baad JSON update")
+    print("   • ✅ Permanent storage - kabhi delete nahi")
+    print("="*60)
     app.run(debug=True, port=5000)
