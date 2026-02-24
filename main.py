@@ -798,7 +798,9 @@ HTML_TEMPLATE = """
 
 <p>📢 Channel :
 <span class="tg" onclick="window.open('https://t.me/obitostuffs','_blank')">@obitostuffs</span></p>
-
+</div>
+</body>
+</html>
 """
 
 @app.route('/')
